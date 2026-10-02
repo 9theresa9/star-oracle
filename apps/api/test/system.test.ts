@@ -7,7 +7,7 @@ import { createHmac } from 'node:crypto';
 import { Redis } from 'ioredis';
 import { db,redis,seal,open,chinaDate,consumeLimit,connectRedis } from '../src/infrastructure.js';
 let child:ChildProcess,mailChild:ChildProcess,model:HTTPSServer;
-let providerCalls=0;
+let providerCalls=0,startupEvent='none',healthStatus=0;
 const base='http://127.0.0.1:3111',origin='http://localhost:5173';
 async function request(path:string,{cookie='',method='GET',body,originOverride=origin}:{cookie?:string;method?:string;body?:unknown;originOverride?:string}={}) {
  return fetch(base+path,{method,headers:{'Content-Type':'application/json',Origin:originOverride,...(cookie?{Cookie:cookie}:{})},...(body!==undefined?{body:JSON.stringify(body)}:{})});
@@ -30,9 +30,11 @@ before(async()=>{
  });await new Promise<void>(resolve=>model.listen(3443,resolve));
  }
  child=spawn(process.execPath,['dist/main.js'],{cwd:process.cwd(),env:process.env,stdio:['ignore','pipe','pipe']});
- // Never print child errors that could contain connection strings.
- for(let i=0;i<100;i++){try{const r=await request('/api/v1/health');if(r.ok)return;}catch{}await new Promise(r=>setTimeout(r,100));}
- throw new Error('Integration API failed to start');
+ child.stdout?.on('data',chunk=>{if(String(chunk).includes('api_ready'))startupEvent='ready';});
+ child.stderr?.on('data',chunk=>{for(const line of String(chunk).split('\n')){try{const value=JSON.parse(line);if(value.event==='api_start_failed')startupEvent=JSON.stringify({errorClass:value.errorClass,code:value.code});}catch{}}});
+ // Only structured startup event/class/code and HTTP status are reported.
+ for(let i=0;i<100;i++){try{const r=await request('/api/v1/health');healthStatus=r.status;if(r.ok)return;}catch{}await new Promise(r=>setTimeout(r,100));}
+ throw new Error('Integration API failed to start: '+startupEvent+', health='+healthStatus);
 });
 after(async()=>{child?.kill('SIGTERM');mailChild?.kill('SIGTERM');if(model)await new Promise<void>(resolve=>model.close(()=>resolve()));await db.$disconnect();redis.disconnect();});
 test('authenticated records, ownership, sharing and diary isolation',async()=>{
