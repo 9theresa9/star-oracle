@@ -28,9 +28,7 @@ jobs:
         env:
           DATABASE_URL: mysql://oracle:unused@127.0.0.1:3306/star_oracle
         run: |
-          if [ ! -f package-lock.json ]; then
-            npm install --package-lock-only --ignore-scripts
-          fi
+          npm install --package-lock-only --ignore-scripts
           npm ci
           if [ ! -f apps/api/prisma/migrations/202610020001_initial/migration.sql ]; then
             mkdir -p apps/api/prisma/migrations/202610020001_initial
@@ -88,7 +86,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run db:generate
-      - run: npm run db:migrate
+      - run: npm run db:migrate -w @star-oracle/api
       - run: npm run typecheck
       - run: npm run build
       - run: npm test

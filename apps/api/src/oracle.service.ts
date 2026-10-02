@@ -1,4 +1,5 @@
-import { Injectable, NotFoundException, ConflictException, TooManyRequestsException, ServiceUnavailableException, BadRequestException } from '@nestjs/common';
+import { RateLimitException } from './exceptions.js';
+import { Injectable, NotFoundException, ConflictException, ServiceUnavailableException, BadRequestException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { drawTarot,castCoinLine,validateReading,basicInterpretation,evidenceFor,validateInterpretation,TAROT_DECK,randomInt,dailyMessage,type Reading,type Interpretation } from '@star-oracle/domain';
@@ -16,7 +17,7 @@ export class OracleService {
  async create(userId:string,input:CreateReadingInput,requestId:string) {
   const previous=await db.reading.findUnique({where:{userId_requestId:{userId,requestId:input.requestId}}});
   if(previous) return decode(previous);
-  if(!await consumeLimit('draw:'+userId,20,60)) throw new TooManyRequestsException('请稍后再探索');
+  if(!await consumeLimit('draw:'+userId,20,60)) throw new RateLimitException('请稍后再探索');
   const reading:Reading={version:1,id:randomUUID(),createdAt:new Date().toISOString(),question:input.question,
    ...(input.kind==='tarot'?{kind:'tarot',spread:input.spread,cards:drawTarot(input.spread,input.allowReversed)}:{kind:'iching',lines:Array.from({length:6},()=>castCoinLine().value)})};
   const payload={...reading,question:''};
@@ -61,9 +62,9 @@ export class OracleService {
   const original=await this.owned(userId,id);
   if(original.ai) return decode(original);
   if(!config.AI_API_KEY) throw new ServiceUnavailableException('AI 尚未配置，基础解读仍可使用');
-  if(!await consumeLimit('ai:user:'+userId,3,60)) throw new TooManyRequestsException('AI 请求较多，请稍后再试');
+  if(!await consumeLimit('ai:user:'+userId,3,60)) throw new RateLimitException('AI 请求较多，请稍后再试');
   const lease=await acquireAILease();
-  if(!lease) throw new TooManyRequestsException('AI 正在忙，请稍后再试');
+  if(!lease) throw new RateLimitException('AI 正在忙，请稍后再试');
   const day=chinaDate(), started=new Date();
   let claimed=false;
   try {
@@ -72,7 +73,7 @@ export class OracleService {
     const row=await tx.reading.updateMany({where:{id,userId,ai:false,OR:[{aiStatus:'idle'},{aiStatus:'pending',aiStartedAt:{lt:new Date(Date.now()-120000)}}]},data:{aiStatus:'pending',aiStartedAt:started,aiReservedDay:day}});
     if(row.count!==1) throw new ConflictException('这份解读正在生成，请稍后刷新');
     const budget=await tx.aIUsage.updateMany({where:{date:day,requests:{lt:config.AI_DAILY_LIMIT}},data:{requests:{increment:1}}});
-    if(budget.count!==1) throw new TooManyRequestsException('今天的 AI 额度已用完');
+    if(budget.count!==1) throw new RateLimitException('今天的 AI 额度已用完');
    });
    claimed=true;
    const reading=decode(original).reading;
@@ -100,7 +101,7 @@ export class OracleService {
    return this.get(userId,id);
   } catch(error) {
    if(claimed) await db.reading.updateMany({where:{id,userId,aiStatus:'pending',aiStartedAt:started},data:{aiStatus:'idle'}}).catch(()=>{});
-   if(error instanceof ConflictException||error instanceof TooManyRequestsException) throw error;
+   if(error instanceof ConflictException||error instanceof RateLimitException) throw error;
    throw new ServiceUnavailableException('AI 暂时不可用，已保留基础解读');
   } finally {await redis.zrem('ai:leases',lease).catch(()=>{});}
  }

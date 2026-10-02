@@ -14,11 +14,11 @@
     "build": "npm run build -w @star-oracle/api && npm run build -w @star-oracle/web",
     "typecheck": "npm run typecheck -w @star-oracle/api && npm run typecheck -w @star-oracle/web",
     "test": "node --test tests/engine.test.js tests/daily.test.js && npm run test -w @star-oracle/api",
-    "dev:api": "npm run dev -w @star-oracle/api",
+    "dev:api": "node --env-file=.env --import tsx --watch apps/api/src/main.ts",
     "dev:web": "npm run dev -w @star-oracle/web",
-    "db:migrate": "npm run db:migrate -w @star-oracle/api",
+    "db:migrate": "node --env-file=.env node_modules/prisma/build/index.js migrate deploy --schema apps/api/prisma/schema.prisma",
     "db:generate": "npm run db:generate -w @star-oracle/api",
-    "admin:promote": "npm run admin:promote -w @star-oracle/api",
+    "admin:promote": "node --env-file=.env --import tsx apps/api/scripts/promote-admin.ts",
     "test:e2e": "playwright test -c tests/e2e/playwright.config.ts"
   },
   "devDependencies": {

@@ -1,0 +1,24 @@
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: local-development-root
+      MYSQL_DATABASE: star_oracle
+      MYSQL_USER: oracle
+      MYSQL_PASSWORD: local-development-db
+    ports: ["127.0.0.1:3306:3306"]
+    volumes: [mysql-dev:/var/lib/mysql]
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1"]
+      interval: 5s
+      retries: 20
+  redis:
+    image: redis:7.4
+    command: ["redis-server", "--requirepass", "local-development-redis"]
+    ports: ["127.0.0.1:6379:6379"]
+  mail:
+    image: axllent/mailpit:v1.27
+    ports: ["127.0.0.1:1025:1025", "127.0.0.1:8025:8025"]
+volumes:
+  mysql-dev:

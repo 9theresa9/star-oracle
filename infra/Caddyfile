@@ -1,0 +1,19 @@
+{
+  email {$TLS_EMAIL}
+}
+{$DOMAIN} {
+  encode zstd gzip
+  request_body {
+    max_size 32KB
+  }
+  header {
+    Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    -Server
+  }
+  handle /api/* {
+    reverse_proxy api:3001
+  }
+  handle {
+    reverse_proxy web:8080
+  }
+}
