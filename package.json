@@ -26,5 +26,9 @@
     "typescript": "5.9.3",
     "tsx": "4.20.6",
     "@types/node": "24.10.0"
+  },
+  "overrides": {
+    "deepmerge-ts": "8.0.2",
+    "effect": "3.20.0"
   }
 }

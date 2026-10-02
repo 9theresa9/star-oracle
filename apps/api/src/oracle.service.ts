@@ -7,7 +7,7 @@ import type { CreateReadingInput,JournalData } from '@star-oracle/contracts';
 import { db,redis,seal,open,audit,consumeLimit,chinaDate,acquireAILease } from './infrastructure.js';
 import { config } from './config.js';
 type Stored=Prisma.ReadingGetPayload<Record<string,never>>;
-function decode(row:Stored) {
+export function decodeReading(row:Stored) {
  const reading=validateReading({...row.payload as object,question:open(row.question,'question:'+row.userId+':'+row.id)});
  return {id:row.id,reading,interpretation:row.interpretation?JSON.parse(open(row.interpretation,'interpretation:'+row.userId+':'+row.id)) as Interpretation:basicInterpretation(reading),
    ai:row.ai,shared:row.shared,createdAt:row.createdAt.toISOString()};
@@ -16,7 +16,7 @@ function decode(row:Stored) {
 export class OracleService {
  async create(userId:string,input:CreateReadingInput,requestId:string) {
   const previous=await db.reading.findUnique({where:{userId_requestId:{userId,requestId:input.requestId}}});
-  if(previous) return decode(previous);
+  if(previous) return decodeReading(previous);
   if(!await consumeLimit('draw:'+userId,20,60)) throw new RateLimitException('请稍后再探索');
   const reading:Reading={version:1,id:randomUUID(),createdAt:new Date().toISOString(),question:input.question,
    ...(input.kind==='tarot'?{kind:'tarot',spread:input.spread,cards:drawTarot(input.spread,input.allowReversed)}:{kind:'iching',lines:Array.from({length:6},()=>castCoinLine().value)})};
@@ -27,10 +27,10 @@ export class OracleService {
     await tx.auditLog.create({data:{id:randomUUID(),actorId:userId,action:'reading.create',targetId:r.id,requestId}});
     return r;
    });
-   return decode(row);
+   return decodeReading(row);
   } catch(error) {
    if(error instanceof Prisma.PrismaClientKnownRequestError&&error.code==='P2002') {
-    const row=await db.reading.findUniqueOrThrow({where:{userId_requestId:{userId,requestId:input.requestId}}});return decode(row);
+    const row=await db.reading.findUniqueOrThrow({where:{userId_requestId:{userId,requestId:input.requestId}}});return decodeReading(row);
    }
    throw error;
   }
@@ -43,7 +43,7 @@ export class OracleService {
   const rows=await db.reading.findMany({where:{userId},orderBy:[{createdAt:'desc'},{id:'desc'}],take:limit+1,...(cursor?{cursor:{id:cursor},skip:1}:{})});
   return {items:rows.slice(0,limit).map(decode),nextCursor:rows.length>limit?rows[limit-1]!.id:null};
  }
- async get(userId:string,id:string) {return decode(await this.owned(userId,id));}
+ async get(userId:string,id:string) {return decodeReading(await this.owned(userId,id));}
  async remove(userId:string,id:string,requestId:string) {
   await this.owned(userId,id);
   await db.$transaction(async tx=>{
@@ -60,7 +60,7 @@ export class OracleService {
  }
  async interpret(userId:string,id:string,requestId:string) {
   const original=await this.owned(userId,id);
-  if(original.ai) return decode(original);
+  if(original.ai) return decodeReading(original);
   if(!config.AI_API_KEY) throw new ServiceUnavailableException('AI 尚未配置，基础解读仍可使用');
   if(!await consumeLimit('ai:user:'+userId,3,60)) throw new RateLimitException('AI 请求较多，请稍后再试');
   const lease=await acquireAILease();
@@ -76,7 +76,7 @@ export class OracleService {
     if(budget.count!==1) throw new RateLimitException('今天的 AI 额度已用完');
    });
    claimed=true;
-   const reading=decode(original).reading;
+   const reading=decodeReading(original).reading;
    const response=await fetch(config.AI_BASE_URL.replace(/\/$/,'')+'/chat/completions',{
     method:'POST',redirect:'error',signal:AbortSignal.timeout(30000),
     headers:{Authorization:'Bearer '+config.AI_API_KEY,'Content-Type':'application/json'},
@@ -122,8 +122,9 @@ export class OracleService {
   if(reading.kind!=='tarot') throw new BadRequestException('星笺无效');
   return {id:row.id,date:row.date,reading,message:dailyMessage(reading.cards[0]!.id),journal:{note:open(row.note,'journal:'+row.userId+':'+row.id),mood:row.mood,version:row.version}};
  }
- async dailyHistory(userId:string) {
-  return {items:(await db.dailyEntry.findMany({where:{userId},orderBy:{date:'desc'},take:90})).map(x=>this.decodeDaily(x))};
+ async dailyHistory(userId:string,{cursor,limit}:{cursor?:string;limit:number}) {
+  const rows=await db.dailyEntry.findMany({where:{userId},orderBy:[{date:'desc'},{id:'desc'}],take:limit+1,...(cursor?{cursor:{id:cursor},skip:1}:{})});
+  return {items:rows.slice(0,limit).map(x=>this.decodeDaily(x)),nextCursor:rows.length>limit?rows[limit-1]!.id:null};
  }
  async journal(userId:string,id:string,input:JournalData) {
   const row=await db.dailyEntry.findFirst({where:{id,userId}});

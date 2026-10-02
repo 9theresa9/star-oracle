@@ -9,7 +9,7 @@ function memoryStorage() {
   return { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) };
 }
 test('calendar dates follow device timezone rather than UTC', () => {
-  const script = "import { localDateKey } from './shared/daily.js'; console.log(localDateKey(new Date('2026-10-02T16:05:00Z')));";
+  const script = "import { localDateKey } from './packages/domain/daily.js'; console.log(localDateKey(new Date('2026-10-02T16:05:00Z')));";
   const run = TZ => execFileSync(process.execPath, ['--input-type=module', '-e', script],
     { encoding: 'utf8', env: { ...process.env, TZ } }).trim();
   assert.equal(run('Asia/Shanghai'), '2026-10-03');

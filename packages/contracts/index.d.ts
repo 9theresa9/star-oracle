@@ -11,3 +11,5 @@ export const PageQuery:ZodType<{cursor?:string;limit:number}>;
 export type ReadingRecord = {id:string;reading:Reading;interpretation:Interpretation;ai:boolean;shared:boolean;createdAt:string};
 export type DailyRecord = {id:string;date:string;reading:Reading;journal:JournalData;message:{title:string;text:string;action:string;reflection:string}};
 export type CurrentUser = {id:string;name:string;email:string;role:'user'|'admin';twoFactorEnabled:boolean};
+export const DailyQuery:ZodType<{cursor?:string;limit:number}>;
+export const AdminPageQuery:ZodType<{cursor?:string;limit:number}>;

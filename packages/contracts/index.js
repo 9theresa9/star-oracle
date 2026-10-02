@@ -5,3 +5,5 @@ export const ShareInput = z.object({shared:z.boolean()}).strict();
 export const AIInput = z.object({consent:z.literal(true)}).strict();
 export const UserStatus = z.object({disabled:z.boolean()}).strict();
 export const PageQuery = z.object({cursor:z.string().uuid().optional(),limit:z.coerce.number().int().min(1).max(50).default(20)}).strict();
+export const DailyQuery = PageQuery.extend({limit:z.coerce.number().int().min(1).max(100).default(90)});
+export const AdminPageQuery = PageQuery.extend({cursor:z.string().regex(/^[a-zA-Z0-9-]{8,80}$/).optional()});

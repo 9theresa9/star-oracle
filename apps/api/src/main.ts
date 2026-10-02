@@ -1,5 +1,4 @@
 import 'reflect-metadata';
-import { Module } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { ExpressAdapter } from '@nestjs/platform-express';
 import express from 'express';
@@ -10,12 +9,8 @@ import { toNodeHandler } from 'better-auth/node';
 import { auth } from './auth.js';
 import { config } from './config.js';
 import { db,redis,consumeLimit } from './infrastructure.js';
-import { PublicController,OracleController,AdminController } from './controllers.js';
-import { OracleService } from './oracle.service.js';
-import { AdminService } from './admin.service.js';
-import { SessionGuard,AdminGuard,SafeErrorFilter } from './security.js';
-@Module({controllers:[PublicController,OracleController,AdminController],providers:[OracleService,AdminService,SessionGuard,AdminGuard]})
-class AppModule {}
+import { AppModule } from './app.module.js';
+import { SafeErrorFilter } from './security.js';
 export async function createApp() {
  const server=express();
  server.disable('x-powered-by');

@@ -23,8 +23,9 @@ export function Account(){
   await run(async()=>{
    const records:ReadingRecord[]=[];let cursor:string|null=null;
    do {const page:{items:ReadingRecord[];nextCursor:string|null}=await api<{items:ReadingRecord[];nextCursor:string|null}>('/readings?limit=50'+(cursor?'&cursor='+cursor:''));records.push(...page.items);cursor=page.nextCursor;}while(cursor);
-   const daily=await api<{items:DailyRecord[]}>('/daily');
-   const blob=new Blob([JSON.stringify({version:2,exportedAt:new Date().toISOString(),readings:records,daily:daily.items},null,2)],{type:'application/json'});
+   const daily:DailyRecord[]=[];cursor=null;
+   do {const page:{items:DailyRecord[];nextCursor:string|null}=await api('/daily?limit=100'+(cursor?'&cursor='+cursor:''));daily.push(...page.items);cursor=page.nextCursor;}while(cursor);
+   const blob=new Blob([JSON.stringify({version:2,exportedAt:new Date().toISOString(),readings:records,daily},null,2)],{type:'application/json'});
    const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='star-oracle-records.json';a.click();URL.revokeObjectURL(url);
   });
  }

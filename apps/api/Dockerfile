@@ -8,7 +8,7 @@ COPY packages/domain packages/domain
 COPY packages/contracts packages/contracts
 RUN npm ci
 COPY apps/api apps/api
-RUN npm run db:generate && npm run build -w @star-oracle/api
+RUN DATABASE_URL=mysql://build:unused@127.0.0.1:3306/star_oracle npm run db:generate && npm run build -w @star-oracle/api
 RUN npm prune --omit=dev
 FROM node:24-bookworm-slim AS runtime
 ENV NODE_ENV=production
