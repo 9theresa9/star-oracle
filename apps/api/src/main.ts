@@ -42,12 +42,22 @@ export async function createApp() {
    next();
   }catch{res.status(503).json({error:{message:'安全服务暂时不可用'}});}
  });
- server.all('/api/auth/*splat',toNodeHandler(auth));
+ const authHandler=toNodeHandler(auth);
+ server.all('/api/auth/*splat',(req,res,next)=>{
+  let bytes=0;
+  req.on('data',(chunk:Buffer)=>{bytes+=chunk.length;if(bytes>32768)req.destroy();});
+  Promise.resolve(authHandler(req,res)).catch(next);
+ });
  server.use(express.json({limit:'32kb'}));
  const app=await NestFactory.create(AppModule,new ExpressAdapter(server),{bodyParser:false,logger:['warn','error']});
  app.useGlobalFilters(new SafeErrorFilter());
  app.enableShutdownHooks();
  await app.init();
+ server.use((error:unknown,req:express.Request,res:express.Response,_next:express.NextFunction)=>{
+  if(res.headersSent)return;
+  const kind=(error as {type?:string})?.type;
+  res.status(kind==='entity.too.large'?413:kind==='entity.parse.failed'?400:503).json({error:{message:'请求无法完成',requestId:(req as express.Request&{requestId:string}).requestId}});
+ });
  return app;
 }
 async function bootstrap() {

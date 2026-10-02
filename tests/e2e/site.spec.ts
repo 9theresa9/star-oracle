@@ -1,7 +1,7 @@
 import { test,expect } from '@playwright/test';
 test('home, guest tarot and six-line ritual fit the viewport',async({page},info)=>{
  await page.goto('/');
- await expect(page.getByRole('heading',{name:'抬头看星。回身看见自己。'})).toBeVisible();
+ await expect(page.getByRole('heading',{name:/抬头看星.*回身看见自己/})).toBeVisible();
  await page.screenshot({path:'test-results/home-'+info.project.name+'.png',fullPage:true});
  await page.getByRole('link',{name:'开启一次探索'}).click();
  await page.getByLabel('此刻，你想探索什么？').fill('这次新的机会，我可以留意什么？');

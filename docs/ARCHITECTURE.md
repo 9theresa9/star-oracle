@@ -12,7 +12,7 @@
 
 ## 采用方案
 
-基于成熟框架重建业务模块，复用已验证的占卜引擎。不是原封不动 fork 一个企业后台。具体依赖：NestJS 11、React 19、Vite、TanStack Query、Prisma 6、MySQL 8.4、Redis 7.4、[Better Auth](https://github.com/better-auth/better-auth) 1.7.7（2026-09-30 稳定版，MIT）。
+基于成熟框架重建业务模块，复用已验证的占卜引擎。不是原封不动 fork 一个企业后台。具体依赖：NestJS 11.2.7、React 19、Vite、TanStack Query、Prisma 6、MySQL 8.4、Redis 7.4、[Better Auth](https://github.com/better-auth/better-auth) 1.7.7（2026-09-30 稳定版，MIT）。
 
 Better Auth 原生负责安全散列、HttpOnly 会话 cookie、邮箱验证、重设密码、TOTP 与恢复码；采用官方 Redis storage 与 Prisma MySQL adapter。没有从头写密码认证或 JWT 刷新流程。Prisma 采用当前锁定的 6.19.0 兼容版本，不使用 8.0 RC；后续升级应单独测试迁移。
 

@@ -11,7 +11,7 @@
     "test": "node --import tsx --test test/*.test.ts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",
-    "admin:promote": "tsx scripts/promote-admin.ts"
+    "admin:promote": "node dist/maintenance/promote-admin.js"
   },
   "dependencies": {
     "@star-oracle/domain": "2.0.0",

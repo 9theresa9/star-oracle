@@ -107,7 +107,11 @@ jobs:
       - name: Audit runtime dependencies
         run: npm audit --omit=dev --audit-level=high
       - run: npx playwright install --with-deps chromium webkit
+      - name: Reset only ephemeral integration Redis before browser accounts
+        run: redis-cli -h 127.0.0.1 FLUSHDB
       - run: npm run test:e2e
+      - name: Validate production Docker builds and isolated stack
+        run: bash scripts/container-smoke.sh
       - name: Record verified revision
         if: always()
         run: git rev-parse HEAD > verified-revision.txt

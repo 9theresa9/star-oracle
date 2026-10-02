@@ -1,6 +1,7 @@
 import { betterAuth } from 'better-auth';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
 import { redisStorage } from '@better-auth/redis-storage';
+import { APIError } from 'better-auth/api';
 import { twoFactor } from 'better-auth/plugins';
 import nodemailer from 'nodemailer';
 import { db,redis } from './infrastructure.js';
@@ -17,7 +18,8 @@ export const auth=betterAuth({
   database:prismaAdapter(db,{provider:'mysql'}),
   secondaryStorage:redisStorage({client:redis,keyPrefix:'auth:'}),
   user:{additionalFields:{role:{type:'string',defaultValue:'user',input:false},disabled:{type:'boolean',defaultValue:false,input:false}},
-    deleteUser:{enabled:true}},
+    deleteUser:{enabled:true,beforeDelete:async user=>{const current=await db.user.findUnique({where:{id:user.id}});if(current?.role==='admin')throw new APIError('FORBIDDEN',{message:'Administrator deletion requires offline maintenance'});}}},
+  databaseHooks:{user:{create:{before:async user=>{if(user.name.length>100||user.email.length>191)throw new APIError('BAD_REQUEST',{message:'Account fields are too long'});return {data:user};}}}},
   session:{expiresIn:60*60*24*7,updateAge:60*60*12,storeSessionInDatabase:true,cookieCache:{enabled:false}},
   emailAndPassword:{enabled:true,minPasswordLength:12,maxPasswordLength:128,
     requireEmailVerification:config.REQUIRE_EMAIL_VERIFICATION==='true',revokeSessionsOnPasswordReset:true,

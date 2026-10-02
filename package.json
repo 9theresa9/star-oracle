@@ -18,7 +18,7 @@
     "dev:web": "npm run dev -w @star-oracle/web",
     "db:migrate": "node --env-file=.env node_modules/prisma/build/index.js migrate deploy --schema apps/api/prisma/schema.prisma",
     "db:generate": "npm run db:generate -w @star-oracle/api",
-    "admin:promote": "node --env-file=.env --import tsx apps/api/scripts/promote-admin.ts",
+    "admin:promote": "node --env-file=.env --import tsx apps/api/src/maintenance/promote-admin.ts",
     "test:e2e": "playwright test -c tests/e2e/playwright.config.ts"
   },
   "devDependencies": {
