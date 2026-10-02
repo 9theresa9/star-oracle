@@ -24,6 +24,7 @@ export class AdminService {
   });return {ok:true};
  }
  async shared(actorId:string,requestId:string,{cursor,limit}:{cursor?:string;limit:number}) {
+  if(cursor&&!await db.reading.findFirst({where:{id:cursor,shared:true}}))throw new NotFoundException('共享记录不存在');
   const rows=await db.reading.findMany({where:{shared:true},take:limit+1,orderBy:[{createdAt:'desc'},{id:'desc'}],...(cursor?{cursor:{id:cursor},skip:1}:{})});
   await audit(actorId,'admin.read_shared',null,requestId);
   return {items:rows.slice(0,limit).map(decodeReading),nextCursor:rows.length>limit?rows[limit-1]!.id:null};

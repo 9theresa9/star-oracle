@@ -79,6 +79,8 @@ jobs:
       - name: Reset only ephemeral integration Redis before browser accounts
         run: node --input-type=module -e 'import {Redis} from "ioredis"; const client=new Redis(process.env.REDIS_URL); await client.flushdb(); client.disconnect();'
       - run: npm run test:e2e
+        env:
+          CI_VISUAL_REVIEW: 'true'
       - name: Validate production Docker builds and isolated stack
         run: |
           sudo apt-get update -qq

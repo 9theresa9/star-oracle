@@ -2,13 +2,15 @@ import { test,expect } from '@playwright/test';
 test('home, guest tarot and six-line ritual fit the viewport',async({page},info)=>{
  await page.goto('/');
  await expect(page.getByRole('heading',{name:/抬头看星.*回身看见自己/})).toBeVisible();
- await page.screenshot({path:'test-results/home-'+info.project.name+'.png',fullPage:true});
+ await expect(page.locator('.hero>.reveal')).toHaveCSS('opacity','1');
+ if(process.env.CI_VISUAL_REVIEW==='true'&&info.project.name!=='small-chromium')console.log('UI_PREVIEW_'+info.project.name+' '+(await page.screenshot({type:'jpeg',quality:65,animations:'disabled'})).toString('base64'));
+ await page.screenshot({animations:'disabled',path:'test-results/home-'+info.project.name+'.png',fullPage:true});
  await page.getByRole('link',{name:'开启一次探索'}).click();
  await page.getByLabel('此刻，你想探索什么？').fill('这次新的机会，我可以留意什么？');
  await page.getByRole('button',{name:'开始抽牌'}).click();
  await expect(page.getByRole('heading',{name:'这次新的机会，我可以留意什么？'})).toBeVisible();
  await expect(page.locator('.tarot-card')).toHaveCount(3);
- await page.screenshot({path:'test-results/tarot-'+info.project.name+'.png',fullPage:true});
+ await page.screenshot({animations:'disabled',path:'test-results/tarot-'+info.project.name+'.png',fullPage:true});
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBeTruthy();
  await page.goto('/iching');
  await page.getByLabel('此刻，你想探索什么？').fill('眼前的变化，需要怎样应对？');
@@ -16,7 +18,7 @@ test('home, guest tarot and six-line ritual fit the viewport',async({page},info)
  for(let i=0;i<6;i++)await page.getByRole('button',{name:'掷三枚铜钱'}).click();
  await expect(page.locator('.hex-line.shown')).toHaveCount(6);
  await expect(page.getByRole('heading',{name:'眼前的变化，需要怎样应对？'})).toBeVisible();
- await page.screenshot({path:'test-results/iching-'+info.project.name+'.png',fullPage:true});
+ await page.screenshot({animations:'disabled',path:'test-results/iching-'+info.project.name+'.png',fullPage:true});
 });
 test('account, cloud daily and private journal work end to end',async({page},info)=>{
  await page.goto('/account');
@@ -34,9 +36,11 @@ test('account, cloud daily and private journal work end to end',async({page},inf
  await expect(page.locator('.daily-letter')).toBeVisible();
  await page.getByRole('button',{name:'平静',exact:true}).click();
  await page.getByLabel('私人日记',{exact:true}).fill('今天想慢一点，听听自己的声音。');
+ const secondSaveResponse=page.waitForResponse(response=>response.url().includes('/journal')&&response.request().method()==='PATCH'&&response.status()===200);
  await page.getByRole('button',{name:'保存',exact:true}).click();
+ await secondSaveResponse;
  await expect(page.getByRole('status')).toContainText('已保存');
- await page.screenshot({path:'test-results/daily-'+info.project.name+'.png',fullPage:true});
+ await page.screenshot({animations:'disabled',path:'test-results/daily-'+info.project.name+'.png',fullPage:true});
  await page.reload();
  await expect(page.getByLabel('私人日记',{exact:true})).toHaveValue('今天想慢一点，听听自己的声音。');
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBeTruthy();

@@ -48,6 +48,7 @@ test('authenticated records, ownership, sharing and diary isolation',async()=>{
   const r=await request(path,{cookie:b.cookie,method,body});assert.equal(r.status,404);
  }
  assert.equal((await request('/api/v1/admin/overview',{cookie:b.cookie})).status,403);
+ assert.equal((await request('/api/v1/readings?cursor='+record.id,{cookie:b.cookie})).status,404,'pagination cursor must belong to the current user');
  assert.equal((await request('/api/v1/readings',{cookie:a.cookie,method:'POST',body:{...input,cards:[{id:'major-fool'}],requestId:crypto.randomUUID()}})).status,400);
  assert.equal((await request('/api/v1/readings',{cookie:a.cookie,method:'POST',body:input,originOverride:'https://evil.example'})).status,403);
  const sameDay=await Promise.all(Array.from({length:8},()=>request('/api/v1/daily/today',{cookie:a.cookie,method:'POST',body:{}}).then(r=>r.json())));

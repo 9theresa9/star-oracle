@@ -40,6 +40,7 @@ export class OracleService {
   if(!row) throw new NotFoundException('记录不存在');return row;
  }
  async list(userId:string,{cursor,limit}:{cursor?:string;limit:number}) {
+  if(cursor)await this.owned(userId,cursor);
   const rows=await db.reading.findMany({where:{userId},orderBy:[{createdAt:'desc'},{id:'desc'}],take:limit+1,...(cursor?{cursor:{id:cursor},skip:1}:{})});
   return {items:rows.slice(0,limit).map(decodeReading),nextCursor:rows.length>limit?rows[limit-1]!.id:null};
  }
@@ -123,6 +124,7 @@ export class OracleService {
   return {id:row.id,date:row.date,reading,message:dailyMessage(reading.cards[0]!.id),journal:{note:open(row.note,'journal:'+row.userId+':'+row.id),mood:row.mood,version:row.version}};
  }
  async dailyHistory(userId:string,{cursor,limit}:{cursor?:string;limit:number}) {
+  if(cursor&&!await db.dailyEntry.findFirst({where:{id:cursor,userId}}))throw new NotFoundException('星笺不存在');
   const rows=await db.dailyEntry.findMany({where:{userId},orderBy:[{date:'desc'},{id:'desc'}],take:limit+1,...(cursor?{cursor:{id:cursor},skip:1}:{})});
   return {items:rows.slice(0,limit).map(x=>this.decodeDaily(x)),nextCursor:rows.length>limit?rows[limit-1]!.id:null};
  }
