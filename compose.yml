@@ -4,7 +4,6 @@ x-api: &api
     context: .
     dockerfile: apps/api/Dockerfile
   image: star-oracle-api:local
-  env_file: .env.production
   environment: &api-env
     NODE_ENV: production
     PORT: 3001
@@ -13,7 +12,22 @@ x-api: &api
     DATABASE_URL: mysql://oracle:${MYSQL_PASSWORD:?Set MYSQL_PASSWORD}@mysql:3306/star_oracle
     REDIS_URL: redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD}@redis:6379
     TRUST_PROXY: linklocal,uniquelocal
-  networks: [internal]
+    AUTH_SECRET: ${AUTH_SECRET:?Set AUTH_SECRET}
+    DATA_ENCRYPTION_KEY: ${DATA_ENCRYPTION_KEY:?Set DATA_ENCRYPTION_KEY}
+    REQUIRE_EMAIL_VERIFICATION: 'true'
+    ADMIN_REQUIRE_2FA: 'true'
+    SMTP_HOST: ${SMTP_HOST:?Set SMTP_HOST}
+    SMTP_PORT: ${SMTP_PORT:-587}
+    SMTP_SECURE: ${SMTP_SECURE:-false}
+    SMTP_USER: ${SMTP_USER:-}
+    SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+    SMTP_FROM: ${SMTP_FROM:?Set SMTP_FROM}
+    AI_API_KEY: ${AI_API_KEY:-}
+    AI_BASE_URL: ${AI_BASE_URL:-https://api.deepseek.com/v1}
+    AI_PROVIDER_NAME: ${AI_PROVIDER_NAME:-DeepSeek}
+    AI_MODEL: ${AI_MODEL:-deepseek-chat}
+    AI_DAILY_LIMIT: ${AI_DAILY_LIMIT:-200}
+  networks: [edge, backend]
   read_only: true
   tmpfs: [/tmp]
   cap_drop: [ALL]
@@ -33,7 +47,7 @@ services:
       MYSQL_MIGRATION_PASSWORD: ${MYSQL_MIGRATION_PASSWORD:?Set MYSQL_MIGRATION_PASSWORD}
     command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
     volumes: [mysql-data:/var/lib/mysql, ./infra/mysql-init.sh:/docker-entrypoint-initdb.d/10-privileges.sh:ro]
-    networks: [internal]
+    networks: [backend]
     security_opt: [no-new-privileges:true]
     healthcheck:
       test: ["CMD-SHELL", "MYSQL_PWD=$$MYSQL_PASSWORD mysqladmin ping -h 127.0.0.1 -uoracle --silent"]
@@ -48,7 +62,7 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD}
     command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\""]
     volumes: [redis-data:/data]
-    networks: [internal]
+    networks: [backend]
     security_opt: [no-new-privileges:true]
     healthcheck:
       test: ["CMD-SHELL", "REDISCLI_AUTH=$$REDIS_PASSWORD redis-cli ping"]
@@ -59,9 +73,9 @@ services:
   migrate:
     <<: *api
     environment:
-      <<: *api-env
       DATABASE_URL: mysql://oracle_migrator:${MYSQL_MIGRATION_PASSWORD:?Set MYSQL_MIGRATION_PASSWORD}@mysql:3306/star_oracle
-    command: ["npm", "run", "db:migrate"]
+    networks: [backend]
+    command: ["npm", "run", "db:migrate", "-w", "@star-oracle/api"]
     restart: "no"
   api:
     <<: *api
@@ -82,7 +96,7 @@ services:
       dockerfile: apps/web/Dockerfile
     image: star-oracle-web:local
     restart: unless-stopped
-    networks: [internal]
+    networks: [edge]
     read_only: true
     tmpfs: [/tmp]
     cap_drop: [ALL]
@@ -100,7 +114,7 @@ services:
       TLS_EMAIL: ${TLS_EMAIL:?Set TLS_EMAIL}
     ports: ["80:80", "443:443"]
     volumes: ["./infra/Caddyfile:/etc/caddy/Caddyfile:ro", "caddy-data:/data", "caddy-config:/config"]
-    networks: [internal]
+    networks: [edge]
     depends_on:
       api: {condition: service_healthy}
       web: {condition: service_healthy}
@@ -109,8 +123,11 @@ services:
     security_opt: [no-new-privileges:true]
     logging: {driver: json-file, options: {max-size: "10m", max-file: "3"}}
 networks:
-  internal:
+  edge:
     driver: bridge
+  backend:
+    driver: bridge
+    internal: true
 volumes:
   mysql-data:
   redis-data:

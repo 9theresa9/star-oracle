@@ -40,6 +40,14 @@ test('account, cloud daily and private journal work end to end',async({page},inf
  await page.reload();
  await expect(page.getByLabel('私人日记',{exact:true})).toHaveValue('今天想慢一点，听听自己的声音。');
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBeTruthy();
+ await page.getByLabel('私人日记',{exact:true}).fill('尚未保存的私人草稿');
+ if(info.project.name!=='desktop-chromium')await page.getByRole('button',{name:'打开导航'}).click();
+ await page.getByRole('navigation').getByRole('link',{name:'记录',exact:true}).click();
+ await expect(page.getByRole('alertdialog',{name:'日记尚未保存'})).toBeVisible();
+ await page.getByRole('button',{name:'留在这里'}).click();
+ await expect(page.getByLabel('私人日记',{exact:true})).toHaveValue('尚未保存的私人草稿');
+ await page.getByRole('button',{name:'保存',exact:true}).click();
+ await expect(page.getByRole('status')).toContainText('已保存');
  await page.goto('/admin');
  await expect(page.getByRole('heading',{name:'需要管理员权限'})).toBeVisible();
 });
