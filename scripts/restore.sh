@@ -12,5 +12,5 @@ age -d -i "$AGE_IDENTITY_FILE" "$backup_file" | gzip -d | docker compose --env-f
 # Revoke restored sessions; Redis must be dedicated to this application.
 docker compose --env-file .env.production exec -T mysql sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql -uroot star_oracle -e "DELETE FROM session;"'
 docker compose --env-file .env.production exec -T redis sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" exec redis-cli FLUSHDB'
-docker compose --env-file .env.production up -d api
+docker compose --env-file .env.production up -d --wait api
 echo "Database restored and sessions revoked. Verify health and decrypt a test record before opening traffic."

@@ -33,4 +33,33 @@ try{
 }finally{await db.$disconnect();}
 JS
 docker compose --env-file .env.production exec -T web wget -q -O /dev/null http://127.0.0.1:8080/
-echo "Separate API/Web images and production MySQL/Redis stack passed."
+# Verify an encrypted backup can actually restore a private record.
+docker compose --env-file .env.production exec -T api node --input-type=module - <<'JS'
+const {db,seal,redis}=await import('./apps/api/dist/infrastructure.js');
+const userId='restore-test-user',id='54d9fd62-8acf-4351-9f27-57da593202e0';
+try{
+ await db.user.create({data:{id:userId,name:'Restore fixture',email:'restore-fixture@example.com',emailVerified:true}});
+ await db.reading.create({data:{id,userId,kind:'tarot',question:seal('恢复演练的私人问题','question:'+userId+':'+id),requestId:id,payload:{version:1,id,createdAt:new Date().toISOString(),kind:'tarot',spread:'single',question:'',cards:[{id:'major-star',reversed:false}]}}});
+}finally{await db.$disconnect();redis.disconnect();}
+JS
+age-keygen -o /tmp/star-oracle-age-identity >/dev/null 2>&1
+export AGE_RECIPIENT="$(age-keygen -y /tmp/star-oracle-age-identity)"
+bash scripts/backup.sh
+docker compose --env-file .env.production exec -T api node --input-type=module - <<'JS'
+const {PrismaClient}=await import('@prisma/client');const db=new PrismaClient();
+try{await db.user.delete({where:{id:'restore-test-user'}});}finally{await db.$disconnect();}
+JS
+export AGE_IDENTITY_FILE=/tmp/star-oracle-age-identity
+export CONFIRM_RESTORE=replace-star-oracle-data
+backup_file="$(find backups -name '*.age' -type f | head -n 1)"
+bash scripts/restore.sh "$backup_file"
+docker compose --env-file .env.production exec -T api node --input-type=module - <<'JS'
+const {db,open,redis}=await import('./apps/api/dist/infrastructure.js');
+try{
+ const id='54d9fd62-8acf-4351-9f27-57da593202e0';
+ const row=await db.reading.findUniqueOrThrow({where:{id}});
+ if(open(row.question,'question:'+row.userId+':'+id)!=='恢复演练的私人问题')throw new Error('Private restore round trip failed');
+ const sessions=await db.session.count();if(sessions!==0)throw new Error('Restored sessions must be revoked');
+}finally{await db.$disconnect();redis.disconnect();}
+JS
+echo "Separate API/Web images, production MySQL/Redis privileges, and encrypted restore passed."

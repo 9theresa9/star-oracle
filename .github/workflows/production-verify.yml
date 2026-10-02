@@ -108,10 +108,13 @@ jobs:
         run: npm audit --omit=dev --audit-level=high
       - run: npx playwright install --with-deps chromium webkit
       - name: Reset only ephemeral integration Redis before browser accounts
-        run: redis-cli -h 127.0.0.1 FLUSHDB
+        run: node --input-type=module -e 'import {Redis} from "ioredis"; const client=new Redis(process.env.REDIS_URL); await client.flushdb(); client.disconnect();'
       - run: npm run test:e2e
       - name: Validate production Docker builds and isolated stack
-        run: bash scripts/container-smoke.sh
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y age
+          bash scripts/container-smoke.sh
       - name: Record verified revision
         if: always()
         run: git rev-parse HEAD > verified-revision.txt
