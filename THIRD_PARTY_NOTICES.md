@@ -20,6 +20,6 @@ NestJS, React, Better Auth, TanStack Query, React Router, Vite, Zod, Express, He
 
 ## Development-only tools
 
-GitHub Actions installs Playwright 1.56.1 to run browser checks. Playwright is licensed under Apache-2.0; it is not included in the application's runtime or frontend runtime.
+GitHub Actions installs Playwright 1.63.0 to run browser checks. Playwright is licensed under Apache-2.0; it is not included in the application's runtime or frontend runtime.
 
 GitHub Actions uses actions/checkout, actions/setup-node and actions/upload-artifact. Their code runs in CI and is not bundled into the website.
