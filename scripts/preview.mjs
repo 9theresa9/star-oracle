@@ -1,0 +1,11 @@
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { previewHTML } from './preview-html.js';
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const paths = { html:'public/index.html', css:'public/styles.css', app:'public/app.js', data:'shared/data.js', engine:'shared/engine.js' };
+const input = {};
+for (const [key, path] of Object.entries(paths)) input[key] = await readFile(resolve(root, path), 'utf8');
+await mkdir(resolve(root, 'artifacts'), { recursive: true });
+await writeFile(resolve(root, 'artifacts/preview.html'), previewHTML(input));
+console.log('Built artifacts/preview.html (basic readings only).');

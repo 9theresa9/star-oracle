@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { chromium, webkit } from 'playwright';
 import { createAppServer } from '../server/index.js';
 import { basicInterpretation } from '../shared/engine.js';
@@ -20,6 +20,8 @@ try {
         }
         await page.goto('/'); await page.locator('#question-form').waitFor(); await noOverflow();
         await page.screenshot({ path: 'artifacts/screenshots/' + browserName + '-' + label + '-home.png', fullPage: true });
+        await page.evaluate(() => { document.documentElement.style.fontSize = '200%'; }); await noOverflow();
+        await page.evaluate(() => { document.documentElement.style.fontSize = ''; });
         await page.locator('#question').fill('面对新机会，我需要留意什么？');
         await page.getByRole('button', { name: '开始抽牌', exact: true }).click();
         assert.equal(await page.locator('.flip-card').count(), 3);
@@ -51,6 +53,22 @@ try {
         assert.deepEqual(errors, []);
         console.log(browserName + ' ' + label + ': tarot, six casts, history, reduced motion and viewport passed.');
         await context.close();
+      }
+      {
+        const previewContext = await browser.newContext({ viewport: { width: 390, height: 844 }, baseURL, reducedMotion: 'reduce' });
+        const previewPage = await previewContext.newPage(); const previewErrors = [];
+        previewPage.on('pageerror', error => previewErrors.push(error.message));
+        const html = await readFile('artifacts/preview.html', 'utf8');
+        await previewPage.route('**/standalone-preview', route => route.fulfill({ contentType: 'text/html', body: html }));
+        await previewPage.goto('/standalone-preview'); await previewPage.locator('#question').fill('我可以怎样开始？');
+        await previewPage.getByRole('button', { name: '开始抽牌', exact: true }).click();
+        await previewPage.getByRole('button', { name: '全部翻开', exact: true }).click();
+        await previewPage.getByRole('button', { name: '查看解读', exact: true }).click();
+        await previewPage.getByRole('heading', { name: '基础解读', exact: true }).waitFor();
+        assert.equal(await previewPage.getByRole('button', { name: 'AI 解读尚未配置', exact: true }).isDisabled(), true);
+        assert.deepEqual(previewErrors, []);
+        console.log(browserName + ': standalone GPT preview passed.');
+        await previewContext.close();
       }
       const context = await browser.newContext({ viewport: { width: 390, height: 844 }, baseURL, reducedMotion: 'reduce' });
       const page = await context.newPage(); const snapshots = [];

@@ -45,6 +45,8 @@ npm test
 npm run build
 ```
 
+npm run preview:build 生成独立的 artifacts/preview.html，可用于 GPT 内交互预览；该预览不连接 AI 后端。
+
 GitHub Actions 还运行 Chromium 与 WebKit 的桌面及 390 × 844 手机尺寸流程，产出首页、塔罗结果和易经结果截图。AI 测试使用模拟服务；真实密钥与付费模型需部署后验证。详见 [review 说明](docs/REVIEW.md)。
 
 ## 部署

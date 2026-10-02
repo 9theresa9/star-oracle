@@ -10,6 +10,9 @@ const state = { page: 'home', mode: 'tarot', question: '', spread: 'three', reve
   reading: null, ai: null, followups: [], revealed: new Set(), lines: [], coins: null,
   coinBusy: false, aiBusy: false, aiError: '', followupDraft: '', aiEnabled: null, storageOK: true, sequence: 0 };
 let controller = null, toastTimer;
+function newReadingId() {
+  return typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : Array.from(crypto.getRandomValues(new Uint8Array(16)), n => n.toString(16).padStart(2, '0')).join('');
+}
 function toast(message) {
   const node = document.querySelector('#toast'); node.textContent = message; node.classList.add('visible');
   clearTimeout(toastTimer); toastTimer = setTimeout(() => node.classList.remove('visible'), 4000);
@@ -277,7 +280,7 @@ app.addEventListener('submit', event => {
     if (state.question.length < 2) return;
     cancelPending(); state.ai = null; state.followups = []; state.aiError = ''; state.followupDraft = '';
     if (state.mode === 'tarot') {
-      state.reading = validateReading({ version: 1, id: crypto.randomUUID(), createdAt: new Date().toISOString(),
+      state.reading = validateReading({ version: 1, id: newReadingId(), createdAt: new Date().toISOString(),
         question: state.question, kind: 'tarot', spread: state.spread, cards: drawTarot(state.spread, state.reversed) });
       state.revealed = new Set(); state.page = 'tarot';
     } else { state.lines = []; state.coins = null; state.reading = null; state.page = 'coins'; }
@@ -302,7 +305,7 @@ app.addEventListener('click', event => {
   if (action === 'result' && state.revealed.size === state.reading.cards.length) showResult();
   if (action === 'toss') toss();
   if (action === 'coin-result' && state.lines.length === 6) {
-    state.reading = validateReading({ version: 1, id: crypto.randomUUID(), createdAt: new Date().toISOString(),
+    state.reading = validateReading({ version: 1, id: newReadingId(), createdAt: new Date().toISOString(),
       question: state.question, kind: 'iching', lines: [...state.lines] }); showResult();
   }
   if (action === 'ai') requestAI();

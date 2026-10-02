@@ -14,6 +14,8 @@
 
 纯 JavaScript 核心已在当前工具运行时检查：78 张唯一牌、抽牌无重复、硬币 1:3:3:1 概率、文王卦序已知样例、全部 4096 种六爻组合，以及前端与 API 的语法。
 
+首个实现提交 1fc5e912 的 GitHub Actions 已通过 Node/API、Worker 构建及 Chromium/WebKit 的桌面/手机流程。后续提交的验证状态以对应 checks 为准。
+
 GitHub Actions 运行 Node 核心/API 测试、Sites Worker 构建及 Chromium/WebKit UI 流程。实际状态以本 PR 的 checks 为准，不能仅凭工作流文件存在认定通过。
 
 浏览器截图下载位置：成功或部分运行后的 Actions → Verify MVP → Artifacts → ui-screenshots。AI 和追问检查使用模拟响应；没有配置或验证真实模型密钥。
