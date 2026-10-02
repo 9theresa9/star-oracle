@@ -92,7 +92,18 @@ jobs:
         run: npm audit --audit-level=high
       - run: npm run typecheck
       - run: npm run build
+      - name: Create local TLS fixture for model contract tests
+        run: |
+          mkdir -p /tmp/star-oracle-tls
+          openssl req -x509 -newkey rsa:2048 -nodes -keyout /tmp/star-oracle-tls/key.pem -out /tmp/star-oracle-tls/cert.pem -days 1 -subj '/CN=localhost' -addext 'subjectAltName=DNS:localhost' >/dev/null 2>&1
       - run: npm test
+        env:
+          AI_API_KEY: integration-model-fixture
+          AI_BASE_URL: https://localhost:3443/v1
+          AI_DAILY_LIMIT: '3'
+          NODE_EXTRA_CA_CERTS: /tmp/star-oracle-tls/cert.pem
+          MOCK_TLS_CERT: /tmp/star-oracle-tls/cert.pem
+          MOCK_TLS_KEY: /tmp/star-oracle-tls/key.pem
       - name: Audit runtime dependencies
         run: npm audit --omit=dev --audit-level=high
       - run: npx playwright install --with-deps chromium webkit
