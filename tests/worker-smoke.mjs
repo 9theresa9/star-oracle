@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import worker from '../dist/server/index.js';
 const origin = 'https://oracle.example';
-for (const path of ['/', '/styles.css', '/app.js', '/shared/data.js', '/shared/engine.js']) {
+for (const path of ['/', '/styles.css', '/app.js', '/daily.js', '/shared/data.js', '/shared/engine.js', '/shared/daily.js']) {
   const response = await worker.fetch(new Request(origin + path), {});
   assert.equal(response.status, 200); assert.ok((await response.text()).length > 100);
 }

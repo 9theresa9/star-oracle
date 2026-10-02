@@ -1,7 +1,7 @@
 name: Verify MVP
 on:
   push:
-    branches: [main, feat/star-oracle-mvp]
+    branches: [main, feat/star-oracle-mvp, feat/daily-starlight]
   pull_request:
 permissions:
   contents: read
@@ -20,6 +20,8 @@ jobs:
       - name: Syntax and core/API tests
         run: |
           node --check public/app.js
+          node --check public/daily.js
+          node --check shared/daily.js
           node --check server/index.js
           npm test
       - name: Build Sites Worker

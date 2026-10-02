@@ -8,7 +8,7 @@ await mkdir(resolve(out, 'server'), { recursive: true });
 await mkdir(resolve(out, '.openai'), { recursive: true });
 const stripModule = source => source.replace(/^import .*;\n/gm, '').replace(/^export \{[^}]+\};?\n/gm, '').replace(/^export /gm, '');
 const parts = await Promise.all(['shared/data.js', 'shared/engine.js', 'server/api.js'].map(async path => stripModule(await readFile(resolve(root, path), 'utf8'))));
-const assetPaths = ['index.html', 'styles.css', 'app.js', 'favicon.svg', 'shared/data.js', 'shared/engine.js'];
+const assetPaths = ['index.html', 'styles.css', 'app.js', 'daily.js', 'favicon.svg', 'shared/data.js', 'shared/engine.js', 'shared/daily.js'];
 const assets = {};
 for (const path of assetPaths) {
   const shared = path.startsWith('shared/');

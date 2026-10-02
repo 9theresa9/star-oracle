@@ -1,6 +1,8 @@
 import { SPREADS, drawTarot, castCoinLine, validateReading, evidenceFor, analyseLines,
   basicInterpretation, validateInterpretation, readingText, getHexagram } from '/shared/engine.js';
 
+import { createDailyExperience } from '/daily.js';
+
 const app = document.querySelector('#app');
 const storageKey = 'star-oracle.history.v1';
 const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -70,7 +72,7 @@ function demoCard(id, name, english, mark) {
 }
 function homeView() {
   return '<section class="home-section"><div class="intro"><p class="eyebrow">A MOMENT FOR YOURSELF</p><h1>向内看。<br><span>向前走。</span></h1>' +
-    '<p class="intro-copy">带着一个问题，给自己一点看清的空间。</p></div>' +
+    '<p class="intro-copy">带着一个问题，给自己一点看清的空间。</p><button class="daily-home-link" data-action="daily"><span aria-hidden="true">✧</span><span>每日星笺<small>给今天留一点光</small></span><span aria-hidden="true">↗</span></button></div>' +
     '<div class="hero-deck" aria-hidden="true"><div class="orbit"></div><div class="showcase-card showcase-left">' +
     demoCard('major-moon', '月亮', 'THE MOON', 'XVIII') + '</div><div class="showcase-card showcase-right">' +
     demoCard('major-sun', '太阳', 'THE SUN', 'XIX') + '</div><div class="showcase-card showcase-center">' +
@@ -185,7 +187,7 @@ function resultView() {
 function render(focusMain = false) {
   const focused = document.activeElement, focusedId = focused?.id;
   const selection = focused instanceof HTMLTextAreaElement ? [focused.selectionStart, focused.selectionEnd] : null;
-  app.innerHTML = state.page === 'home' ? homeView() : state.page === 'tarot' ? tarotView() :
+  app.innerHTML = state.page === 'daily' ? daily.view() : state.page === 'home' ? homeView() : state.page === 'tarot' ? tarotView() :
     state.page === 'coins' ? coinView() : resultView();
   if (focusMain) { app.focus({ preventScroll: true }); window.scrollTo({ top: 0, behavior: 'instant' }); }
   else if (focusedId) {
@@ -296,6 +298,7 @@ app.addEventListener('click', event => {
   if (!button || button.disabled) return;
   const action = button.dataset.action;
   if (action === 'home') home();
+  if (action === 'daily') daily.open();
   if (action === 'suggest') {
     state.question = { work: '面对新的工作机会，我需要看清什么？', relationship: '在这段关系里，我可以怎样更好地沟通？', self: '此刻，我最需要照顾自己的哪一部分？' }[button.dataset.topic];
     document.querySelector('#question').value = state.question; document.querySelector('#question').focus();
@@ -311,6 +314,16 @@ app.addEventListener('click', event => {
   if (action === 'ai') requestAI();
   if (action === 'copy') copy();
 });
+const daily = createDailyExperience({
+  mount: app, renderCard: cardFace, toast,
+  onShow: () => { cancelPending(); state.page = 'daily'; render(true); },
+  onRender: () => { if (state.page === 'daily') render(); },
+  onInterpret: reading => {
+    cancelPending(); state.reading = structuredClone(reading); state.ai = null; state.followups = [];
+    state.aiError = ''; state.followupDraft = ''; showResult();
+  }
+});
+document.querySelector('#daily-button').addEventListener('click', () => daily.open());
 document.querySelector('#home-button').addEventListener('click', home);
 document.querySelector('#about-button').addEventListener('click', () => document.querySelector('#about-dialog').showModal());
 document.querySelector('#history-button').addEventListener('click', () => { renderHistory(); document.querySelector('#history-dialog').showModal(); });
