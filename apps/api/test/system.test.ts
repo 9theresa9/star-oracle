@@ -5,7 +5,7 @@ import { createServer as httpsServer,type Server as HTTPSServer } from 'node:htt
 import { readFileSync } from 'node:fs';
 import { createHmac } from 'node:crypto';
 import { Redis } from 'ioredis';
-import { db,redis,seal,open,chinaDate,consumeLimit } from '../src/infrastructure.js';
+import { db,redis,seal,open,chinaDate,consumeLimit,connectRedis } from '../src/infrastructure.js';
 let child:ChildProcess,mailChild:ChildProcess,model:HTTPSServer;
 let providerCalls=0;
 const base='http://127.0.0.1:3111',origin='http://localhost:5173';
@@ -20,6 +20,7 @@ async function register(label:string) {
  assert.ok(cookie);return {id:data.user.id as string,cookie,email};
 }
 before(async()=>{
+ await connectRedis();
  if(process.env.MOCK_TLS_CERT&&process.env.MOCK_TLS_KEY){
  model=httpsServer({cert:readFileSync(process.env.MOCK_TLS_CERT),key:readFileSync(process.env.MOCK_TLS_KEY)},async(req,res)=>{
   let text='';for await(const chunk of req)text+=chunk;

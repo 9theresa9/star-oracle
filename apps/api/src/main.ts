@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { toNodeHandler } from 'better-auth/node';
 import { auth } from './auth.js';
 import { config } from './config.js';
-import { db,redis,consumeLimit } from './infrastructure.js';
+import { db,redis,consumeLimit,connectRedis } from './infrastructure.js';
 import { AppModule } from './app.module.js';
 import { SafeErrorFilter } from './security.js';
 export async function createApp() {
@@ -61,6 +61,7 @@ export async function createApp() {
  return app;
 }
 async function bootstrap() {
+ await connectRedis();
  await db.$connect();
  await redis.ping();
  const app=await createApp();
@@ -70,4 +71,4 @@ async function bootstrap() {
  const close=async()=>{await app.close();await db.$disconnect();redis.disconnect();};
  process.once('SIGTERM',()=>{void close();});process.once('SIGINT',()=>{void close();});
 }
-if(process.argv[1]===fileURLToPath(import.meta.url)) bootstrap().catch(()=>{console.error('API startup failed; check configuration and dependencies');process.exit(1);});
+if(process.argv[1]===fileURLToPath(import.meta.url)) bootstrap().catch(error=>{console.error(JSON.stringify({event:'api_start_failed',errorClass:error?.constructor?.name??'Error',code:error?.code??null}));process.exit(1);});

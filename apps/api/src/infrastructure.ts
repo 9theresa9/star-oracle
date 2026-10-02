@@ -35,3 +35,14 @@ export async function acquireAILease():Promise<string|null> {
 export function chinaDate(now=new Date()):string {
   return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(now);
 }
+
+export async function connectRedis():Promise<void> {
+ if(redis.status==='ready')return;
+ await new Promise<void>((resolve,reject)=>{
+  const finish=(error?:Error)=>{clearTimeout(timer);redis.off('ready',ready);redis.off('error',failed);error?reject(error):resolve();};
+  const ready=()=>finish(),failed=()=>finish(new Error('Redis connection unavailable'));
+  const timer=setTimeout(()=>finish(new Error('Redis connection timeout')),4000);
+  redis.once('ready',ready);redis.once('error',failed);
+  if(redis.status==='ready')finish();
+ });
+}
