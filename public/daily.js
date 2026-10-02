@@ -21,8 +21,13 @@ export function createDailyExperience({ mount, renderCard, toast, onShow, onRend
     if (!drafts.has(entry.date)) drafts.set(entry.date, { mood: entry.mood, note: entry.note, dirty: false });
     return drafts.get(entry.date);
   }
-  function withLock(task) {
-    return navigator.locks?.request ? navigator.locks.request('star-oracle.daily.v1', task) : Promise.resolve().then(task);
+  async function withLock(task) {
+    if (!navigator.locks?.request) return task();
+    try { return await navigator.locks.request('star-oracle.daily.v1', task); }
+    catch (error) {
+      if (error.name === 'SecurityError' || error.name === 'NotSupportedError') return task();
+      throw error;
+    }
   }
   function cardMarkup(entry) {
     const card = entry ? evidenceFor(entry.reading)[0] :
@@ -143,11 +148,9 @@ export function createDailyExperience({ mount, renderCard, toast, onShow, onRend
     }
     if (action === 'copy') {
       const entry = store.get(renderedDate); if (!entry) return;
-      const card = evidenceFor(entry.reading)[0], message = dailyMessage(card.reference), draft = draftFor(entry);
-      const mood = DAILY_MOODS.find(item => item.id === draft.mood);
+      const card = evidenceFor(entry.reading)[0], message = dailyMessage(card.reference);
       const text = ['照见 · 每日星笺', dateLabel(entry.date), card.name + ' · 正位', message.title, message.text,
-        '今天可以做的一件小事：' + message.action, message.reflection,
-        ...(mood ? ['此刻心情：' + mood.label] : []), ...(draft.note.trim() ? ['留给自己的话：' + draft.note.trim()] : [])].join('\n\n');
+        '今天可以做的一件小事：' + message.action, message.reflection].join('\n\n');
       try { await navigator.clipboard.writeText(text); toast('星笺已复制。'); }
       catch {
         const field = document.querySelector('#copy-text'); field.value = text;

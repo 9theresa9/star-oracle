@@ -37,7 +37,8 @@ try {
           value: { writeText: async () => { throw new Error('Clipboard unavailable for fallback test'); } } }));
         await page.getByRole('button', { name: '复制星笺', exact: true }).click();
         await page.locator('#copy-dialog[open]').waitFor();
-        assert.ok((await page.locator('#copy-text').inputValue()).includes('今天给自己一点时间。'));
+        assert.ok((await page.locator('#copy-text').inputValue()).includes('今天可以做的一件小事'));
+        assert.ok(!(await page.locator('#copy-text').inputValue()).includes('今天给自己一点时间。'));
         await page.getByRole('button', { name: '关闭复制窗口', exact: true }).click();
         await page.reload(); await page.getByRole('button', { name: '每日星笺', exact: true }).click();
         assert.equal(await page.locator('#daily-card').isDisabled(), true);
@@ -122,6 +123,7 @@ try {
         await dayPage.evaluate(() => window.dispatchEvent(new Event('focus')));
         await dayPage.getByRole('button', { name: '领取今日星笺', exact: true }).waitFor();
         await dayPage.getByRole('button', { name: '领取今日星笺', exact: true }).click();
+        await dayPage.waitForFunction(() => JSON.parse(localStorage.getItem('star-oracle.daily.v1'))[0].date === '2026-10-03');
         const secondDay = JSON.parse(await dayPage.evaluate(() => localStorage.getItem('star-oracle.daily.v1')))[0];
         assert.equal(secondDay.date, '2026-10-03');
         await dayPage.getByRole('button', { name: '星笺日记', exact: true }).click();
@@ -146,6 +148,11 @@ try {
         const cleared = JSON.parse(await dayPage.evaluate(() => localStorage.getItem('star-oracle.daily.v1')));
         assert.ok(cleared.every(entry => !entry.note && entry.mood === null));
         assert.deepEqual(cleared.map(entry => entry.reading), [secondDay.reading, firstDay.reading]);
+        await dayPage.getByRole('button', { name: '关闭星笺日记', exact: true }).click();
+        await dayPage.getByRole('button', { name: '继续探索这张牌', exact: true }).click();
+        await dayPage.getByRole('heading', { name: '基础解读', exact: true }).waitFor();
+        const deeper = JSON.parse(await dayPage.evaluate(() => localStorage.getItem('star-oracle.history.v1')))[0].reading;
+        assert.deepEqual(deeper, secondDay.reading);
         assert.deepEqual(dayErrors, []);
         console.log(browserName + ': local midnight rollover, unsaved draft, past-day editing, shared tabs and diary clearing passed.');
         await dayContext.close();
