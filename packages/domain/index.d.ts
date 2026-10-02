@@ -1,0 +1,18 @@
+export type TarotCard = {id:string;name:string;en:string;mark:string;upright:string[];reversed:string[];suit?:string;rank?:string};
+export type Reading = {version:1;id:string;createdAt:string;question:string} & ({kind:'tarot';spread:'single'|'three';cards:{id:string;reversed:boolean}[]} | {kind:'iching';lines:number[]});
+export type Interpretation = {summary:string;insights:{reference:string;text:string}[];actions:string[];reflection:string};
+export type Evidence = {reference:string;name:string;position:string;mark?:string;reversed?:boolean;keywords?:string[];number?:number;theme?:string;prompt?:string};
+export const TAROT_DECK:TarotCard[];
+export const KING_WEN_BY_MASK:Record<number,number>;
+export const SPREADS:Record<'single'|'three',{name:string;positions:string[]}>;
+export function randomInt(max:number):number;
+export function drawTarot(spread?:'single'|'three',allowReversed?:boolean):{id:string;reversed:boolean}[];
+export function castCoinLine():{coins:number[];value:number};
+export function validateReading(value:unknown):Reading;
+export function evidenceFor(value:Reading):Evidence[];
+export function basicInterpretation(value:Reading):Interpretation;
+export function validateInterpretation(value:unknown,reading:Reading):Interpretation;
+export function readingText(value:Reading,interpretation?:Interpretation):string;
+export function analyseLines(lines:number[]):{original:{number:number;name:string;theme:string;prompt:string};resulting:{number:number;name:string;theme:string;prompt:string};moving:number[];lines:number[]};
+export function dailyMessage(cardId:string):{title:string;text:string;action:string;reflection:string};
+export const DAILY_MOODS:{id:string;label:string;symbol:string}[];

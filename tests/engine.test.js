@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { TAROT_DECK, randomInt, drawTarot, castCoinLine, getHexagram, analyseLines,
-  validateReading, evidenceFor, basicInterpretation, validateInterpretation } from '../shared/engine.js';
+  validateReading, evidenceFor, basicInterpretation, validateInterpretation } from '../packages/domain/engine.js';
 const reading = () => ({ version: 1, id: 'reading-test-123', createdAt: '2026-10-02T00:00:00Z',
   question: '面对新机会，我需要留意什么？', kind: 'tarot', spread: 'three',
   cards: [{ id: 'major-star', reversed: false }, { id: 'major-strength', reversed: true },

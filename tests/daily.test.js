@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { TAROT_DECK } from '../shared/engine.js';
-import { createDailyStore, dailyMessage, localDateKey, validateDailyEntry, DAILY_STORAGE_KEY } from '../shared/daily.js';
+import { TAROT_DECK } from '../packages/domain/engine.js';
+import { createDailyStore, dailyMessage, localDateKey, validateDailyEntry, DAILY_STORAGE_KEY } from '../packages/domain/daily.js';
 
 function memoryStorage() {
   const values = new Map();

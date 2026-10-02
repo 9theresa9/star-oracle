@@ -1,0 +1,130 @@
+generator client {
+  provider = "prisma-client-js"
+}
+datasource db {
+  provider = "mysql"
+  url = env("DATABASE_URL")
+}
+model User {
+  id String @id @db.VarChar(36)
+  name String @db.VarChar(100)
+  email String @unique @db.VarChar(191)
+  emailVerified Boolean @default(false)
+  image String? @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  role String @default("user") @db.VarChar(16)
+  disabled Boolean @default(false)
+  twoFactorEnabled Boolean @default(false)
+  sessions Session[]
+  accounts Account[]
+  twoFactors TwoFactor[]
+  readings Reading[]
+  daily DailyEntry[]
+  @@map("user")
+}
+model Session {
+  id String @id @db.VarChar(36)
+  expiresAt DateTime
+  token String @unique @db.VarChar(191)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String? @db.VarChar(100)
+  userAgent String? @db.Text
+  userId String @db.VarChar(36)
+  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+  @@index([userId])
+  @@map("session")
+}
+model Account {
+  id String @id @db.VarChar(36)
+  accountId String @db.VarChar(191)
+  providerId String @db.VarChar(100)
+  userId String @db.VarChar(36)
+  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+  accessToken String? @db.Text
+  refreshToken String? @db.Text
+  idToken String? @db.Text
+  accessTokenExpiresAt DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope String? @db.Text
+  password String? @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([userId])
+  @@map("account")
+}
+model Verification {
+  id String @id @db.VarChar(36)
+  identifier String @db.VarChar(191)
+  value String @db.Text
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([identifier])
+  @@map("verification")
+}
+model TwoFactor {
+  id String @id @db.VarChar(36)
+  secret String @db.Text
+  backupCodes String @db.Text
+  userId String @db.VarChar(36)
+  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+  verified Boolean? @default(true)
+  failedVerificationCount Int? @default(0)
+  lockedUntil DateTime?
+  @@index([userId])
+  @@map("twoFactor")
+}
+model Reading {
+  id String @id @db.VarChar(36)
+  userId String @db.VarChar(36)
+  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+  kind String @db.VarChar(16)
+  question String @db.Text
+  payload Json
+  interpretation String? @db.LongText
+  ai Boolean @default(false)
+  shared Boolean @default(false)
+  requestId String @db.VarChar(36)
+  aiStatus String @default("idle") @db.VarChar(16)
+  aiStartedAt DateTime?
+  aiReservedDay String? @db.VarChar(10)
+  createdAt DateTime @default(now())
+  @@unique([userId,requestId])
+  @@index([userId,createdAt])
+  @@index([shared,createdAt])
+  @@map("reading")
+}
+model DailyEntry {
+  id String @id @db.VarChar(36)
+  userId String @db.VarChar(36)
+  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+  date String @db.VarChar(10)
+  payload Json
+  note String @db.Text
+  mood String? @db.VarChar(16)
+  version Int @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@unique([userId,date])
+  @@index([userId,createdAt])
+  @@map("daily_entry")
+}
+model AuditLog {
+  id String @id @db.VarChar(36)
+  actorId String? @db.VarChar(36)
+  action String @db.VarChar(80)
+  targetId String? @db.VarChar(36)
+  requestId String @db.VarChar(36)
+  createdAt DateTime @default(now())
+  @@index([createdAt])
+  @@index([actorId,createdAt])
+  @@map("audit_log")
+}
+model AIUsage {
+  date String @id @db.VarChar(10)
+  requests Int @default(0)
+  updatedAt DateTime @updatedAt
+  @@map("ai_usage")
+}

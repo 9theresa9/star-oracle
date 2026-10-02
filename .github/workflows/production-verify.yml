@@ -1,0 +1,112 @@
+name: Production architecture verification
+on:
+  push:
+    branches: [feat/production-architecture]
+  pull_request:
+    paths: ['apps/**', 'packages/**', 'compose*.yml', 'infra/**', 'tests/e2e/**', 'package*.json', '.github/workflows/production-verify.yml']
+permissions:
+  contents: read
+concurrency:
+  group: production-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  prepare:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Generate initial lock and migration
+        env:
+          DATABASE_URL: mysql://oracle:unused@127.0.0.1:3306/star_oracle
+        run: |
+          if [ ! -f package-lock.json ]; then
+            npm install --package-lock-only --ignore-scripts
+          fi
+          npm ci
+          if [ ! -f apps/api/prisma/migrations/202610020001_initial/migration.sql ]; then
+            mkdir -p apps/api/prisma/migrations/202610020001_initial
+            npx prisma migrate diff --from-empty --to-schema-datamodel apps/api/prisma/schema.prisma --script > apps/api/prisma/migrations/202610020001_initial/migration.sql
+          fi
+          git add package-lock.json apps/api/prisma/migrations
+          if ! git diff --cached --quiet; then
+            git config user.name "Star Oracle build"
+            git config user.email "noreply@users.noreply.github.com"
+            git commit -m "build: pin dependency lock and initial MySQL migration"
+            git push origin HEAD:${{ github.ref_name }}
+          fi
+      - id: source
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+  verify:
+    needs: prepare
+    if: always() && (needs.prepare.result == 'success' || needs.prepare.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: integration-root-password
+          MYSQL_DATABASE: star_oracle
+          MYSQL_USER: oracle
+          MYSQL_PASSWORD: integration-db-password
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pintegration-root-password"
+          --health-interval=10s --health-timeout=5s --health-retries=15
+      redis:
+        image: redis:7.4
+        ports: ['6379:6379']
+        options: --health-cmd="redis-cli ping" --health-interval=5s --health-timeout=3s --health-retries=10
+    env:
+      NODE_ENV: test
+      PORT: 3111
+      WEB_ORIGIN: http://localhost:5173
+      API_PUBLIC_URL: http://localhost:5173
+      DATABASE_URL: mysql://oracle:integration-db-password@127.0.0.1:3306/star_oracle
+      REDIS_URL: redis://127.0.0.1:6379
+      AUTH_SECRET: integration-test-secret-12345678901234567890
+      DATA_ENCRYPTION_KEY: 1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef
+      REQUIRE_EMAIL_VERIFICATION: 'false'
+      ADMIN_REQUIRE_2FA: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run db:generate
+      - run: npm run db:migrate
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm test
+      - name: Audit runtime dependencies
+        run: npm audit --omit=dev --audit-level=high
+      - run: npx playwright install --with-deps chromium webkit
+      - run: npm run test:e2e
+      - name: Record verified revision
+        if: always()
+        run: git rev-parse HEAD > verified-revision.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: production-review
+          path: |
+            verified-revision.txt
+            test-results/
+            playwright-report/
+            apps/web/dist/
+            apps/api/prisma/migrations/
+          retention-days: 14

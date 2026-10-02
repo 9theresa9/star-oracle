@@ -1,72 +1,33 @@
-# 照见 · Star Oracle
+# 照见 · Star Oracle 2
 
-中文塔罗与易经探索网站。深紫、香槟金与克制的星空氛围；桌面与手机分别排版，支持减少动态效果。
+独立 React 前端 + NestJS API + MySQL 8.4 + Redis 7.4。塔罗、易经、每日星笺、私人日记、账户与管理后台。
 
-## 运行
+当前升级在 `feat/production-architecture` 分支；旧 Worker 原型保留在 Git 历史与原部署，升级不会自动改动它。
 
-需要 Node.js 22.13 或更新版本。应用运行无需安装第三方依赖。
+## 应用与数据
 
-```sh
-npm start
-```
+- `apps/web`：React / Vite / TypeScript / TanStack Query；可独立构建静态站点。
+- `apps/api`：NestJS / Express / Better Auth / Prisma；可独立运行与横向扩展。
+- `packages/domain`：已验证的 78 张牌、64 卦、随机与解读规则。
+- `packages/contracts`：共享 HTTP 请求校验和类型。
+- MySQL：永久记录、用户、会话索引、审计和 AI 日预算。
+- Redis：认证短期数据、跨实例限流和 AI 并发租约。
 
-打开 http://localhost:3000。开发时运行 npm run dev。
+安装、正式部署、架构取舍与安全验证见 `docs/`。首次提交的 CI 生成并提交依赖锁与初始 SQL 迁移；后续 CI 使用 `npm ci` 和已提交迁移，不在生产执行 schema push。
 
-## 首版功能
+## 本地开发
 
-- 78 张塔罗牌；单张或“情境 · 提醒 · 行动”三张牌阵，可选逆位。
-- 加密随机源、拒绝采样与 Fisher–Yates 洗牌；同一牌阵不重复。
-- 三枚硬币起六爻，从下向上；标准文王卦序、本卦、动爻与变卦。
-- 点选翻牌、逐次起爻，支持系统“减少动态效果”。
-- 基础象征解读，以及可选的服务端 AI 解读和追问。
-- 本机最近十次记录，支持重看、复制、删除和清空。
-- 无账号系统、支付、数据库或完整纳甲排盘。
+1. 安装 Node.js 24 与 Docker Compose。
+2. 复制 `.env.example` 为 `.env`。
+3. 启动开发数据库、Redis 与邮件服务：`docker compose -f compose.dev.yml up -d`。
+4. `npm ci`，`npm run db:generate`，加载环境变量后 `npm run db:migrate`。
+5. 加载环境变量后 `npm run dev:api`；另一个终端 `npm run dev:web`。
+6. 打开 http://localhost:5173；开发邮件在 http://localhost:8025 查看。
 
-## 每日星笺与日记
-
-- 首页入口及顶部“每日”导航，手机以单张卡片和来信为中心。
-- 按设备本地日期，从 78 张正位牌中随机抽取一张；同一浏览器当天固定。
-- 每张牌都有编辑整理的短句、小行动和反思问题，不依赖 AI 密钥。
-- 心情与一句日记，回看和编辑过去的星笺，复制文字。
-- 最近 90 张星笺独立保存在 star-oracle.daily.v1；清除日记或普通探索记录不会重抽当天的牌。
-- 跨天切换、暂留当前页面未保存的日记草稿、同源标签页同步；支持 Web Locks 的浏览器会串行处理首次抽牌与保存。
-- 清除浏览器数据会重置，每台设备与浏览器独立。存储不可用时保留当前页面结果并提示复制。
-
-## AI 配置
-
-复制 .env.example 为 .env，在服务器上填写：
-
-```dotenv
-AI_API_KEY=你的模型服务密钥
-AI_MODEL=gpt-4o-mini
-AI_BASE_URL=https://api.openai.com/v1
-```
-
-使用 DeepSeek 时，把 AI_MODEL 改为 deepseek-chat，AI_BASE_URL 改为 https://api.deepseek.com/v1。兼容提供 chat/completions 和 JSON 对象输出的服务。
-
-模型密钥只在后端使用；.env 已忽略。未配置密钥时，抽牌、起卦、基础解读和历史记录都能使用，界面明确显示 AI 未配置。AI 服务会产生该服务的调用费用。
-
-服务器根据牌 ID 或六爻值重建依据，丢弃客户端自带的牌名和关键词。追问与重试沿用原结果。响应必须包含所有固定 reference 且不能新增或重复 reference；这项验证检查格式和关联，不能证明解释内容正确。
+推荐使用 `node --env-file=.env` 启动已构建 API；开发命令加载方法详见部署文档。绝不把 .env、密钥或正式用户数据提交到仓库。
 
 ## 验证
 
-```sh
-npm test
-npm run build
-```
+`npm run typecheck`、`npm run build`、`npm test`、`npm run test:e2e`。集成测试需要真实 MySQL 与 Redis；GitHub Actions 自动提供，并记录测试所使用的完整提交 SHA。界面在桌面 Chromium、iPhone WebKit 和 320px 浏览器验证。
 
-npm run preview:build 生成独立的 artifacts/preview.html，可用于 GPT 内交互预览；该预览不连接 AI 后端。
-
-GitHub Actions 还运行 Chromium 与 WebKit 的桌面及 390 × 844 手机尺寸流程，产出首页、塔罗结果和易经结果截图。AI 测试使用模拟服务；真实密钥与付费模型需部署后验证。详见 [review 说明](docs/REVIEW.md)。
-
-## 部署
-
-普通服务器：npm start；容器：Dockerfile 已提供，需要通过环境变量传入密钥。
-
-Sites：npm run build 生成 dist/server/index.js（Cloudflare Worker），同一产物包含前端静态资源与后端 API。详见 [Sites 部署说明](docs/DEPLOYMENT.md)。GitHub 上传、CI 构建和 Sites 发布是不同步骤；访问链接以成功部署返回的实际 URL 为准。
-
-## 内容与许可
-
-牌面为符号设计。大阿卡纳使用简短关键词，小阿卡纳使用花色与阶位组合提示。易经提供现代主题与反思问题，不含古籍卦辞、爻辞原文。
-
-数据改编自 MIT 项目 [Xuandu](https://github.com/cnc876297794-arch/xuandu)。上游版权声明保存在 licenses/xuandu-MIT.txt；来源见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+安全没有“零隐患”承诺。实现、测试、部署与剩余外部条件分别记录，具体以成功的 CI 与部署验收为准。

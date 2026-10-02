@@ -1,0 +1,13 @@
+import type { ZodType } from 'zod';
+import type { Reading, Interpretation } from '@star-oracle/domain';
+export type CreateReadingInput = {kind:'tarot'|'iching';question:string;spread:'single'|'three';allowReversed:boolean;requestId:string};
+export type JournalData = {note:string;mood:'calm'|'hopeful'|'tired'|'restless'|'low'|null;version:number};
+export const CreateReading:ZodType<CreateReadingInput>;
+export const JournalInput:ZodType<JournalData>;
+export const ShareInput:ZodType<{shared:boolean}>;
+export const AIInput:ZodType<{consent:true}>;
+export const UserStatus:ZodType<{disabled:boolean}>;
+export const PageQuery:ZodType<{cursor?:string;limit:number}>;
+export type ReadingRecord = {id:string;reading:Reading;interpretation:Interpretation;ai:boolean;shared:boolean;createdAt:string};
+export type DailyRecord = {id:string;date:string;reading:Reading;journal:JournalData;message:{title:string;text:string;action:string;reflection:string}};
+export type CurrentUser = {id:string;name:string;email:string;role:'user'|'admin';twoFactorEnabled:boolean};

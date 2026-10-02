@@ -1,0 +1,36 @@
+import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
+import { db,redis,chinaDate,audit } from './infrastructure.js';
+import { OracleService } from './oracle.service.js';
+import { config } from './config.js';
+@Injectable()
+export class AdminService {
+ async overview() {
+  const [users,readings,daily,ai]=await Promise.all([db.user.count(),db.reading.count(),db.dailyEntry.count(),db.aIUsage.findUnique({where:{date:chinaDate()}})]);
+  return {users,readings,dailyEntries:daily,aiRequestsToday:ai?.requests??0,aiDailyLimit:config.AI_DAILY_LIMIT,aiConfigured:!!config.AI_API_KEY,database:'ready',redis:await redis.ping()==='PONG'?'ready':'unavailable'};
+ }
+ async users() {
+  return {items:await db.user.findMany({take:100,orderBy:{createdAt:'desc'},select:{id:true,name:true,email:true,role:true,disabled:true,createdAt:true}})};
+ }
+ async status(actorId:string,id:string,disabled:boolean,requestId:string) {
+  const user=await db.user.findUnique({where:{id}});
+  if(!user) throw new NotFoundException('用户不存在');
+  if(user.role==='admin'||id===actorId) throw new ForbiddenException('管理员账户只能通过服务器维护命令修改');
+  await db.$transaction(async tx=>{
+   await tx.user.update({where:{id},data:{disabled}});
+   if(disabled) await tx.session.deleteMany({where:{userId:id}});
+   await tx.auditLog.create({data:{id:randomUUID(),actorId,action:disabled?'user.disable':'user.enable',targetId:id,requestId}});
+  });return {ok:true};
+ }
+ async shared(actorId:string,requestId:string) {
+  const rows=await db.reading.findMany({where:{shared:true},take:50,orderBy:{createdAt:'desc'}});
+  await audit(actorId,'admin.read_shared',null,requestId);
+  const oracle=new OracleService();
+  const items=[];
+  for(const row of rows)items.push(await oracle.get(row.userId,row.id));
+  return {items};
+ }
+ async logs() {
+  return {items:await db.auditLog.findMany({take:100,orderBy:{createdAt:'desc'},select:{id:true,actorId:true,action:true,targetId:true,requestId:true,createdAt:true}})};
+ }
+}
