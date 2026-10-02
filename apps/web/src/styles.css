@@ -14,3 +14,5 @@
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}.reveal{opacity:1;transform:none}}
 
 .art-card.front{transform:rotate(9deg)}
+
+.star-mark{display:block;width:1em;height:1em}.brand-icon{display:inline-flex}.giant-star{display:block}
