@@ -6,15 +6,17 @@ export const db = new PrismaClient({log:[]});
 export const redis = new Redis(config.REDIS_URL,{enableOfflineQueue:false,maxRetriesPerRequest:1,connectTimeout:3000});
 redis.on('error',()=>{/* Error details may contain credentials; never log them. */});
 const key = Buffer.from(config.DATA_ENCRYPTION_KEY,'hex');
-export function seal(text:string):string {
+export function seal(text:string,context=''):string {
   const iv=randomBytes(12), cipher=createCipheriv('aes-256-gcm',key,iv);
+  cipher.setAAD(Buffer.from(context));
   const body=Buffer.concat([cipher.update(text,'utf8'),cipher.final()]);
   return ['v1',iv.toString('base64'),cipher.getAuthTag().toString('base64'),body.toString('base64')].join('.');
 }
-export function open(value:string):string {
+export function open(value:string,context=''):string {
   const [version,iv,tag,body]=value.split('.');
   if(version!=='v1'||!iv||!tag||body===undefined) throw new Error('Invalid encrypted record');
   const decipher=createDecipheriv('aes-256-gcm',key,Buffer.from(iv,'base64'));
+  decipher.setAAD(Buffer.from(context));
   decipher.setAuthTag(Buffer.from(tag,'base64'));
   return Buffer.concat([decipher.update(Buffer.from(body,'base64')),decipher.final()]).toString('utf8');
 }

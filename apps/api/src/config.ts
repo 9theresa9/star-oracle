@@ -15,6 +15,7 @@ const raw = z.object({
   REQUIRE_EMAIL_VERIFICATION:z.enum(['true','false']).default('true'),
   ADMIN_REQUIRE_2FA:z.enum(['true','false']).default('true'),
   AI_API_KEY:z.string().optional(),AI_BASE_URL:z.string().url().default('https://api.deepseek.com/v1'),
+  AI_PROVIDER_NAME:z.string().min(1).max(100).default('DeepSeek'),
   AI_MODEL:z.string().max(100).default('deepseek-chat'),
   AI_DAILY_LIMIT:z.coerce.number().int().min(1).max(10000).default(200),
   TRUST_PROXY:z.enum(['false','loopback','linklocal,uniquelocal']).default('false'),

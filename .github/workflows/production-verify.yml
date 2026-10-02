@@ -87,6 +87,9 @@ jobs:
       - run: npm ci
       - run: npm run db:generate
       - run: npm run db:migrate -w @star-oracle/api
+      - name: Inspect dependency advisories
+        continue-on-error: true
+        run: npm audit --omit=dev --audit-level=high
       - run: npm run typecheck
       - run: npm run build
       - run: npm test

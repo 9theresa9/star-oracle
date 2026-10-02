@@ -9,7 +9,7 @@ import { config } from './config.js';
 @Controller('api/v1')
 export class PublicController {
  @Get('health') async health(){await db.$queryRaw`SELECT 1`;await redis.ping();return {status:'ok'};}
- @Get('config') config(){return {aiEnabled:!!config.AI_API_KEY,timeZone:'Asia/Shanghai',privacy:'shared-only'};}
+ @Get('config') config(){return {aiEnabled:!!config.AI_API_KEY,aiProvider:config.AI_PROVIDER_NAME,timeZone:'Asia/Shanghai',privacy:'shared-only'};}
 }
 @Controller('api/v1')
 @UseGuards(SessionGuard)

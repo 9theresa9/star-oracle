@@ -42,7 +42,7 @@ test('authenticated records, ownership, sharing and diary isolation',async()=>{
  assert.equal((await request('/api/v1/daily/'+daily.id+'/journal',{cookie:a.cookie,method:'PATCH',body:{note:'stale',mood:null,version:0}})).status,409);
  assert.equal((await request('/api/v1/daily/'+daily.id+'/journal',{cookie:b.cookie,method:'PATCH',body:{note:'intrusion',mood:null,version:1}})).status,404);
  const stored=await db.dailyEntry.findUniqueOrThrow({where:{id:daily.id}});assert.ok(!stored.note.includes('PRIVATE-DIARY-CONTENT'));
- const saved=await db.reading.findUniqueOrThrow({where:{id:record.id}});assert.ok(!saved.question.includes(input.question));assert.equal(open(saved.question),input.question);
+ const saved=await db.reading.findUniqueOrThrow({where:{id:record.id}});assert.ok(!saved.question.includes(input.question));assert.equal(open(saved.question,'question:'+a.id+':'+record.id),input.question);
  await db.user.update({where:{id:b.id},data:{role:'admin'}});
  let shared=await request('/api/v1/admin/shared-readings',{cookie:b.cookie});assert.equal((await shared.json()).items.length,0);
  await request('/api/v1/readings/'+record.id+'/sharing',{cookie:a.cookie,method:'PATCH',body:{shared:true}});

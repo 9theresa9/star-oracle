@@ -5,7 +5,7 @@ x-api: &api
     dockerfile: apps/api/Dockerfile
   image: star-oracle-api:local
   env_file: .env.production
-  environment:
+  environment: &api-env
     NODE_ENV: production
     PORT: 3001
     WEB_ORIGIN: https://${DOMAIN:?Set DOMAIN}
@@ -30,8 +30,9 @@ services:
       MYSQL_DATABASE: star_oracle
       MYSQL_USER: oracle
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Set MYSQL_PASSWORD}
+      MYSQL_MIGRATION_PASSWORD: ${MYSQL_MIGRATION_PASSWORD:?Set MYSQL_MIGRATION_PASSWORD}
     command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
-    volumes: [mysql-data:/var/lib/mysql]
+    volumes: [mysql-data:/var/lib/mysql, ./infra/mysql-init.sh:/docker-entrypoint-initdb.d/10-privileges.sh:ro]
     networks: [internal]
     security_opt: [no-new-privileges:true]
     healthcheck:
@@ -57,6 +58,9 @@ services:
     logging: {driver: json-file, options: {max-size: "10m", max-file: "3"}}
   migrate:
     <<: *api
+    environment:
+      <<: *api-env
+      DATABASE_URL: mysql://oracle_migrator:${MYSQL_MIGRATION_PASSWORD:?Set MYSQL_MIGRATION_PASSWORD}@mysql:3306/star_oracle
     command: ["npm", "run", "db:migrate"]
     restart: "no"
   api:

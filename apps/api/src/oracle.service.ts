@@ -8,8 +8,8 @@ import { db,redis,seal,open,audit,consumeLimit,chinaDate,acquireAILease } from '
 import { config } from './config.js';
 type Stored=Prisma.ReadingGetPayload<Record<string,never>>;
 function decode(row:Stored) {
- const reading=validateReading({...row.payload as object,question:open(row.question)});
- return {id:row.id,reading,interpretation:row.interpretation?JSON.parse(open(row.interpretation)) as Interpretation:basicInterpretation(reading),
+ const reading=validateReading({...row.payload as object,question:open(row.question,'question:'+row.userId+':'+row.id)});
+ return {id:row.id,reading,interpretation:row.interpretation?JSON.parse(open(row.interpretation,'interpretation:'+row.userId+':'+row.id)) as Interpretation:basicInterpretation(reading),
    ai:row.ai,shared:row.shared,createdAt:row.createdAt.toISOString()};
 }
 @Injectable()
@@ -23,7 +23,7 @@ export class OracleService {
   const payload={...reading,question:''};
   try {
    const row=await db.$transaction(async tx=>{
-    const r=await tx.reading.create({data:{id:reading.id,userId,kind:reading.kind,question:seal(reading.question),payload:payload as Prisma.InputJsonValue,requestId:input.requestId}});
+    const r=await tx.reading.create({data:{id:reading.id,userId,kind:reading.kind,question:seal(reading.question,'question:'+userId+':'+reading.id),payload:payload as Prisma.InputJsonValue,requestId:input.requestId}});
     await tx.auditLog.create({data:{id:randomUUID(),actorId:userId,action:'reading.create',targetId:r.id,requestId}});
     return r;
    });
@@ -94,7 +94,7 @@ export class OracleService {
    if(typeof text!=='string') throw new Error('Invalid provider result');
    const result=validateInterpretation(JSON.parse(text),reading);
    await db.$transaction(async tx=>{
-    const updated=await tx.reading.updateMany({where:{id,userId,aiStatus:'pending',aiStartedAt:started},data:{interpretation:seal(JSON.stringify(result)),ai:true,aiStatus:'done'}});
+    const updated=await tx.reading.updateMany({where:{id,userId,aiStatus:'pending',aiStartedAt:started},data:{interpretation:seal(JSON.stringify(result),'interpretation:'+userId+':'+id),ai:true,aiStatus:'done'}});
     if(updated.count!==1) throw new ConflictException('记录状态已改变，请刷新');
     await tx.auditLog.create({data:{id:randomUUID(),actorId:userId,action:'reading.ai',targetId:id,requestId}});
    });
@@ -112,7 +112,7 @@ export class OracleService {
    const card=TAROT_DECK[randomInt(TAROT_DECK.length)]!;
    const id=randomUUID();
    const reading:Reading={version:1,id,createdAt:new Date().toISOString(),question:'今天，我可以怎样更好地照顾自己？',kind:'tarot',spread:'single',cards:[{id:card.id,reversed:false}]};
-   try {row=await db.dailyEntry.create({data:{id,userId,date,payload:reading as Prisma.InputJsonValue,note:seal('')}});}
+   try {row=await db.dailyEntry.create({data:{id,userId,date,payload:reading as Prisma.InputJsonValue,note:seal('','journal:'+userId+':'+id)}});}
    catch(error){if(error instanceof Prisma.PrismaClientKnownRequestError&&error.code==='P2002')row=await db.dailyEntry.findUniqueOrThrow({where});else throw error;}
   }
   return this.decodeDaily(row);
@@ -120,7 +120,7 @@ export class OracleService {
  decodeDaily(row:Prisma.DailyEntryGetPayload<Record<string,never>>) {
   const reading=validateReading(row.payload);
   if(reading.kind!=='tarot') throw new BadRequestException('星笺无效');
-  return {id:row.id,date:row.date,reading,message:dailyMessage(reading.cards[0]!.id),journal:{note:open(row.note),mood:row.mood,version:row.version}};
+  return {id:row.id,date:row.date,reading,message:dailyMessage(reading.cards[0]!.id),journal:{note:open(row.note,'journal:'+row.userId+':'+row.id),mood:row.mood,version:row.version}};
  }
  async dailyHistory(userId:string) {
   return {items:(await db.dailyEntry.findMany({where:{userId},orderBy:{date:'desc'},take:90})).map(x=>this.decodeDaily(x))};
@@ -128,7 +128,7 @@ export class OracleService {
  async journal(userId:string,id:string,input:JournalData) {
   const row=await db.dailyEntry.findFirst({where:{id,userId}});
   if(!row) throw new NotFoundException('星笺不存在');
-  const changed=await db.dailyEntry.updateMany({where:{id,userId,version:input.version},data:{note:seal(input.note.trim()),mood:input.mood,version:{increment:1}}});
+  const changed=await db.dailyEntry.updateMany({where:{id,userId,version:input.version},data:{note:seal(input.note.trim(),'journal:'+userId+':'+id),mood:input.mood,version:{increment:1}}});
   if(changed.count!==1) throw new ConflictException('日记已在其他设备更新，请刷新后再保存');
   return this.decodeDaily(await db.dailyEntry.findUniqueOrThrow({where:{id}}));
  }
