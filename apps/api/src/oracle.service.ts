@@ -41,7 +41,7 @@ export class OracleService {
  }
  async list(userId:string,{cursor,limit}:{cursor?:string;limit:number}) {
   const rows=await db.reading.findMany({where:{userId},orderBy:[{createdAt:'desc'},{id:'desc'}],take:limit+1,...(cursor?{cursor:{id:cursor},skip:1}:{})});
-  return {items:rows.slice(0,limit).map(decode),nextCursor:rows.length>limit?rows[limit-1]!.id:null};
+  return {items:rows.slice(0,limit).map(decodeReading),nextCursor:rows.length>limit?rows[limit-1]!.id:null};
  }
  async get(userId:string,id:string) {return decodeReading(await this.owned(userId,id));}
  async remove(userId:string,id:string,requestId:string) {
