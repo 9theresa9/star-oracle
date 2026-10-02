@@ -60,6 +60,9 @@ jobs:
         options: >-
           --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pintegration-root-password"
           --health-interval=10s --health-timeout=5s --health-retries=15
+      mailpit:
+        image: axllent/mailpit:v1.31.3
+        ports: ['1025:1025', '8025:8025']
       redis:
         image: redis:7.4
         ports: ['6379:6379']
@@ -104,6 +107,7 @@ jobs:
           NODE_EXTRA_CA_CERTS: /tmp/star-oracle-tls/cert.pem
           MOCK_TLS_CERT: /tmp/star-oracle-tls/cert.pem
           MOCK_TLS_KEY: /tmp/star-oracle-tls/key.pem
+          MAILPIT_URL: http://127.0.0.1:8025
       - name: Audit runtime dependencies
         run: npm audit --omit=dev --audit-level=high
       - run: npx playwright install --with-deps chromium webkit

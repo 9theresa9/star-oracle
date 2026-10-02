@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import { createHmac } from 'node:crypto';
 import { Redis } from 'ioredis';
 import { db,redis,seal,open,chinaDate,consumeLimit } from '../src/infrastructure.js';
-let child:ChildProcess,model:HTTPSServer;
+let child:ChildProcess,mailChild:ChildProcess,model:HTTPSServer;
 let providerCalls=0;
 const base='http://127.0.0.1:3111',origin='http://localhost:5173';
 async function request(path:string,{cookie='',method='GET',body,originOverride=origin}:{cookie?:string;method?:string;body?:unknown;originOverride?:string}={}) {
@@ -33,7 +33,7 @@ before(async()=>{
  for(let i=0;i<100;i++){try{const r=await request('/api/v1/health');if(r.ok)return;}catch{}await new Promise(r=>setTimeout(r,100));}
  throw new Error('Integration API failed to start');
 });
-after(async()=>{child?.kill('SIGTERM');if(model)await new Promise<void>(resolve=>model.close(()=>resolve()));await db.$disconnect();redis.disconnect();});
+after(async()=>{child?.kill('SIGTERM');mailChild?.kill('SIGTERM');if(model)await new Promise<void>(resolve=>model.close(()=>resolve()));await db.$disconnect();redis.disconnect();});
 test('authenticated records, ownership, sharing and diary isolation',async()=>{
  await redis.flushdb();
  const a=await register('owner'),b=await register('other');
@@ -140,4 +140,50 @@ test('rate limit counter is shared across independent Redis connections',async()
   const count=await second.incr('limit:'+key);
   assert.equal(count,2);assert.equal(await consumeLimit(key,1,30),false);
  }finally{second.disconnect();}
+});
+
+test('verified email registration and password reset revoke prior sessions',{skip:!process.env.MAILPIT_URL},async()=>{
+ await redis.flushdb();
+ const mailBase='http://127.0.0.1:3112',mailpit=process.env.MAILPIT_URL!;
+ mailChild=spawn(process.execPath,['dist/main.js'],{cwd:process.cwd(),env:{...process.env,PORT:'3112',API_PUBLIC_URL:mailBase,REQUIRE_EMAIL_VERIFICATION:'true',SMTP_HOST:'127.0.0.1',SMTP_PORT:'1025',SMTP_SECURE:'false',SMTP_FROM:'Oracle <oracle@example.com>'},stdio:['ignore','pipe','pipe']});
+ for(let i=0;i<100;i++){try{if((await fetch(mailBase+'/api/v1/health')).ok)break;}catch{}await new Promise(r=>setTimeout(r,100));}
+ const send=(path:string,body:unknown,cookie='')=>fetch(mailBase+path,{method:'POST',headers:{Origin:origin,'Content-Type':'application/json',...(cookie?{Cookie:cookie}:{})},body:JSON.stringify(body)});
+ const email='verified-'+crypto.randomUUID()+'@example.com',password='verified-test-password-123';
+ const signup=await send('/api/auth/sign-up/email',{name:'Email fixture',email,password,callbackURL:origin+'/account'});
+ assert.equal(signup.status,200);
+ const unverified=await send('/api/auth/sign-in/email',{email,password});assert.equal(unverified.status,403);
+ async function messageLink(fragment:string){
+  for(let i=0;i<100;i++){
+   const list=await fetch(mailpit+'/api/v1/messages').then(r=>r.json());
+   for(const m of list.messages??[]){
+    if(!m.To?.some((to:{Address:string})=>to.Address===email))continue;
+    const message=await fetch(mailpit+'/api/v1/message/'+m.ID).then(r=>r.json());
+    const link=(message.Text as string).match(/https?:\/\/[^\s]+/g)?.find(url=>url.includes(fragment));
+    if(link)return link;
+   }
+   await new Promise(r=>setTimeout(r,100));
+  }
+  throw new Error('Expected verification/reset email was not delivered');
+ }
+ const verified=await fetch(await messageLink('verify-email'),{redirect:'manual'});
+ assert.equal(verified.status,302);
+ const login=await send('/api/auth/sign-in/email',{email,password});assert.equal(login.status,200);
+ const cookie=login.headers.getSetCookie().map(v=>v.split(';')[0]).join('; ');
+ assert.equal((await fetch(mailBase+'/api/v1/me',{headers:{Cookie:cookie}})).status,200);
+ const reset=await send('/api/auth/request-password-reset',{email,redirectTo:origin+'/account'});assert.equal(reset.status,200);
+ const resetLink=await messageLink('reset-password');
+ const redirected=await fetch(resetLink,{redirect:'manual'});
+ const token=new URL(redirected.headers.get('location')??resetLink).searchParams.get('token');
+ assert.ok(token);
+ const changed=await send('/api/auth/reset-password',{token,newPassword:'a-new-verified-password-456'});assert.equal(changed.status,200);
+ assert.equal((await fetch(mailBase+'/api/v1/me',{headers:{Cookie:cookie}})).status,401);
+ assert.equal((await send('/api/auth/sign-in/email',{email,password})).status,401);
+ assert.equal((await send('/api/auth/sign-in/email',{email,password:'a-new-verified-password-456'})).status,200);
+ const user=await db.user.findUniqueOrThrow({where:{email}});
+ // Ordinary users can delete their account; the server cascades all owned records.
+ await db.dailyEntry.create({data:{id:crypto.randomUUID(),userId:user.id,date:'2026-01-01',payload:{},note:seal('fixture')}});
+ const signed=await send('/api/auth/sign-in/email',{email,password:'a-new-verified-password-456'});
+ const finalCookie=signed.headers.getSetCookie().map(v=>v.split(';')[0]).join('; ');
+ const deleted=await send('/api/auth/delete-user',{password:'a-new-verified-password-456'},finalCookie);assert.equal(deleted.status,200);
+ assert.equal(await db.user.count({where:{id:user.id}}),0);assert.equal(await db.dailyEntry.count({where:{userId:user.id}}),0);
 });

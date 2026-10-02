@@ -13,6 +13,7 @@ const send = (email:string,subject:string,url:string) => {
     .catch(()=>console.error(JSON.stringify({event:'mail_delivery_failed'})));
 };
 export const auth=betterAuth({
+  logger:{disabled:true},
   appName:'照见 Star Oracle',baseURL:config.API_PUBLIC_URL,basePath:'/api/auth',secret:config.AUTH_SECRET,
   trustedOrigins:[config.WEB_ORIGIN],
   database:prismaAdapter(db,{provider:'mysql'}),
