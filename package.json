@@ -1,0 +1,17 @@
+{
+  "name": "star-oracle",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Responsive Chinese tarot and I Ching exploration with an optional server-side AI interpreter.",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env server/index.js",
+    "dev": "node --watch --env-file-if-exists=.env server/index.js",
+    "test": "node --test tests/*.test.js",
+    "test:browser": "node tests/browser-smoke.mjs",
+    "build": "node scripts/build.mjs"
+  }
+}

@@ -1,0 +1,9 @@
+node_modules/
+.env
+.env.*
+!.env.example
+coverage/
+artifacts/
+.DS_Store
+dist/
+.sites-runtime/
