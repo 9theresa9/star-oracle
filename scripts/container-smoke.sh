@@ -2,7 +2,21 @@
 set -euo pipefail
 umask 077
 cleanup() {
+  smoke_status=$?
+  if [ "$smoke_status" -ne 0 ] && [ -f .env.production ]; then
+    node --input-type=module - <<'JS'
+import {readFileSync} from 'node:fs';
+import {spawnSync} from 'node:child_process';
+const env=readFileSync('.env.production','utf8');
+const secrets=env.split('\n').filter(line=>/^(?:MYSQL_.*PASSWORD|REDIS_PASSWORD|AUTH_SECRET|DATA_ENCRYPTION_KEY|SMTP_PASSWORD|AI_API_KEY)=/.test(line)).map(line=>line.slice(line.indexOf('=')+1)).filter(Boolean);
+const result=spawnSync('docker',['compose','--env-file','.env.production','logs','--no-color','--tail','60','mysql','migrate','api','web'],{encoding:'utf8',timeout:15000});
+let logs=(result.stdout||'')+(result.stderr||'');
+for(const secret of secrets)logs=logs.split(secret).join('[redacted]');
+console.log(logs);
+JS
+  fi
   docker compose --env-file .env.production stop api web mysql redis >/dev/null 2>&1 || true
+  exit "$smoke_status"
 }
 trap cleanup EXIT
 # Fixture credentials exist only in this ephemeral CI job, never in review artifacts.
