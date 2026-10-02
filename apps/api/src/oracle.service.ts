@@ -16,7 +16,7 @@ export function decodeReading(row:Stored) {
 export class OracleService {
  async create(userId:string,input:CreateReadingInput,requestId:string) {
   const previous=await db.reading.findUnique({where:{userId_requestId:{userId,requestId:input.requestId}}});
-  if(previous) return decodeReading(previous);
+  if(previous){const saved=decodeReading(previous);if(saved.reading.question!==input.question||saved.reading.kind!==input.kind||(saved.reading.kind==='tarot'&&saved.reading.spread!==input.spread))throw new ConflictException('请求标识已用于另一个问题，请重新开始');return saved;}
   if(!await consumeLimit('draw:'+userId,20,60)) throw new RateLimitException('请稍后再探索');
   const reading:Reading={version:1,id:randomUUID(),createdAt:new Date().toISOString(),question:input.question,
    ...(input.kind==='tarot'?{kind:'tarot',spread:input.spread,cards:drawTarot(input.spread,input.allowReversed)}:{kind:'iching',lines:Array.from({length:6},()=>castCoinLine().value)})};
