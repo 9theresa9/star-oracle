@@ -15,7 +15,11 @@ test('home, guest tarot and six-line ritual fit the viewport',async({page},info)
  await page.goto('/iching');
  await page.getByLabel('此刻，你想探索什么？').fill('眼前的变化，需要怎样应对？');
  await page.getByRole('button',{name:'开始起卦'}).click();
- for(let i=0;i<6;i++)await page.getByRole('button',{name:'掷三枚铜钱'}).click();
+ // Wait for each visible state transition before the next toss, as a person would.
+ for(let i=0;i<6;i++){
+  await page.getByRole('button',{name:'掷三枚铜钱'}).click();
+  await expect(page.locator('.hex-line.shown')).toHaveCount(i+1);
+ }
  await expect(page.locator('.hex-line.shown')).toHaveCount(6);
  await expect(page.getByRole('heading',{name:'眼前的变化，需要怎样应对？'})).toBeVisible();
  await page.screenshot({animations:'disabled',path:'test-results/iching-'+info.project.name+'.png',fullPage:true});
@@ -50,7 +54,9 @@ test('account, cloud daily and private journal work end to end',async({page},inf
  await expect(page.getByRole('alertdialog',{name:'日记尚未保存'})).toBeVisible();
  await page.getByRole('button',{name:'留在这里'}).click();
  await expect(page.getByLabel('私人日记',{exact:true})).toHaveValue('尚未保存的私人草稿');
+ const draftSaveResponse=page.waitForResponse(response=>response.url().includes('/journal')&&response.request().method()==='PATCH'&&response.status()===200);
  await page.getByRole('button',{name:'保存',exact:true}).click();
+ await draftSaveResponse;
  await expect(page.getByRole('status')).toContainText('已保存');
  await page.goto('/admin');
  await expect(page.getByRole('heading',{name:'需要管理员权限'})).toBeVisible();
