@@ -115,8 +115,8 @@ test('management publishing, feedback, redemption and membership use real isolat
   await member.goto('/membership');
   expect((await redeem(credits.code)).status()).toBe(201);
   await expect(member.locator('.allowance')).toContainText('额外额度 7 次');
-  await expect(member.locator('.ledger-list table')).toContainText('兑换码领取');
-  await expect(member.locator('.ledger-list table')).toContainText('+7');
+  await expect(member.locator('.credits-ledger table')).toContainText('兑换码领取');
+  await expect(member.locator('.credits-ledger table')).toContainText('+7');
   const plus=await createCode('membership',30);
   expect((await redeem(plus.code)).status()).toBe(201);
   await expect(member.getByRole('heading',{name:'Plus 会员',exact:true})).toBeVisible();
