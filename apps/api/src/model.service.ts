@@ -69,9 +69,8 @@ export async function requestModel(input:ModelRequest):Promise<Interpretation> {
    }
   }
   // Refresh the lease after database contention and before the bounded provider call.
-  const renewed=await redis.zadd('ai:leases','XX',Date.now()+60000,lease);
+  await redis.zadd('ai:leases','XX',Date.now()+60000,lease);
   if(await redis.zscore('ai:leases',lease)===null)throw new RateLimitException('AI 排队已超时，请重新尝试');
-  void renewed;
   const response=await fetch(config.AI_BASE_URL.replace(/\/$/,'')+'/chat/completions',{
    method:'POST',redirect:'error',signal:AbortSignal.timeout(30000),
    headers:{Authorization:'Bearer '+config.AI_API_KEY,'Content-Type':'application/json'},

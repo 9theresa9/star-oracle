@@ -13,9 +13,9 @@ export type ReadingMetadata={favorite:boolean;tags:string[];note:string;version:
 export function decodeReading(row:Stored,includeMetadata=true) {
  const reading=validateReading({...row.payload as object,question:open(row.question,'question:'+row.userId+':'+row.id)});
  return {id:row.id,reading,interpretation:row.interpretation?JSON.parse(open(row.interpretation,'interpretation:'+row.userId+':'+row.id)) as Interpretation:basicInterpretation(reading),
-   ai:row.ai,shared:row.shared,createdAt:row.createdAt.toISOString(),favorite:row.favorite,
+   ai:row.ai,shared:row.shared,createdAt:row.createdAt.toISOString(),favorite:includeMetadata?row.favorite:false,
    tags:includeMetadata&&row.tagsCipher?JSON.parse(open(row.tagsCipher,'reading-tags:'+row.userId+':'+row.id)) as string[]:[],
-   note:includeMetadata&&row.annotation?open(row.annotation,'reading-note:'+row.userId+':'+row.id):'',metadataVersion:row.metadataVersion};
+   note:includeMetadata&&row.annotation?open(row.annotation,'reading-note:'+row.userId+':'+row.id):'',metadataVersion:includeMetadata?row.metadataVersion:0};
 }
 function verifyDuplicate(row:Stored,input:CreateReadingInput) {
  const saved=decodeReading(row),reading=saved.reading,options=(row.payload as Record<string,unknown>)._createOptions as {allowReversed?:boolean}|undefined;
