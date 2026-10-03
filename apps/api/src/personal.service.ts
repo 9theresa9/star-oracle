@@ -138,6 +138,16 @@ export class PersonalService {
   const where={userId};
   const counts=await Promise.all([db.reading.count({where}),db.dailyEntry.count({where}),db.actionPlan.count({where}),db.reviewReport.count({where}),db.readingConversation.count({where}),db.feedback.count({where}),db.creditLedger.count({where})]);
   if(counts.reduce((a,b)=>a+b,0)>20000)throw new PayloadTooLargeException('记录较多，请联系管理员安排分批导出');
+  // Reject oversized exports before loading/decrypting all rows into server memory.
+  const sizes=await db.$queryRaw<{size:bigint|null}[]>(Prisma.sql`SELECT SUM(bytes) AS size FROM (
+   SELECT COALESCE(SUM(OCTET_LENGTH(question)+OCTET_LENGTH(CAST(payload AS CHAR))+COALESCE(OCTET_LENGTH(interpretation),0)+COALESCE(OCTET_LENGTH(annotation),0)+COALESCE(OCTET_LENGTH(tagsCipher),0)),0) AS bytes FROM reading WHERE userId = ${userId}
+   UNION ALL SELECT COALESCE(SUM(OCTET_LENGTH(note)+OCTET_LENGTH(CAST(payload AS CHAR))),0) FROM daily_entry WHERE userId = ${userId}
+   UNION ALL SELECT COALESCE(SUM(OCTET_LENGTH(titleCipher)+COALESCE(OCTET_LENGTH(detailCipher),0)),0) FROM action_plan WHERE userId = ${userId}
+   UNION ALL SELECT COALESCE(SUM(COALESCE(OCTET_LENGTH(resultCipher),0)),0) FROM review_report WHERE userId = ${userId}
+   UNION ALL SELECT COALESCE(SUM(OCTET_LENGTH(promptCipher)+COALESCE(OCTET_LENGTH(answerCipher),0)),0) FROM reading_conversation WHERE userId = ${userId}
+   UNION ALL SELECT COALESCE(SUM(OCTET_LENGTH(bodyCipher)+COALESCE(OCTET_LENGTH(adminReplyCipher),0)),0) FROM feedback WHERE userId = ${userId}
+  ) AS owned_sizes`);
+  if(Number(sizes[0]?.size??0)>12000000)throw new PayloadTooLargeException('导出文件较大，请联系管理员安排分批导出');
   const [readings,daily,actions,reports,conversations,feedback,ledger,membership]=await Promise.all([
    db.reading.findMany({where,orderBy:{createdAt:'asc'}}),db.dailyEntry.findMany({where,orderBy:{date:'asc'}}),db.actionPlan.findMany({where,orderBy:{createdAt:'asc'}}),db.reviewReport.findMany({where,orderBy:{createdAt:'asc'}}),db.readingConversation.findMany({where,orderBy:{createdAt:'asc'}}),db.feedback.findMany({where,orderBy:{createdAt:'asc'}}),db.creditLedger.findMany({where,orderBy:{createdAt:'asc'},select:{id:true,kind:true,amount:true,balance:true,createdAt:true}}),new MembershipService().get(userId)
   ]);
