@@ -62,9 +62,24 @@ test('saved explorations, private calendar, actions, reviews and export survive 
  await expect(page.getByRole('status').filter({hasText:'已保存到你的私人记录'})).toBeVisible();
  expect(daily.journal.note).toBe(journal);
 
- await page.goto('/tarot');
- await page.getByLabel('此刻，你想探索什么？',{exact:true}).fill(question);
- await page.getByRole('button',{name:/情境 · 提醒 · 行动/}).click();
+ // Hold the real account response while the new page is usable. A saved exploration
+ // must never silently become a guest result because session loading is slower.
+ let releaseSession!:()=>void,sessionRequested!:()=>void;
+ const sessionBarrier=new Promise<void>(resolve=>{releaseSession=resolve;});
+ const requestedSession=new Promise<void>(resolve=>{sessionRequested=resolve;});
+ await page.route('**/api/v1/me',async route=>{
+  sessionRequested();
+  await sessionBarrier;
+  await route.continue();
+ },{times:1});
+ try{
+  await page.goto('/tarot');
+  await requestedSession;
+  await page.getByLabel('此刻，你想探索什么？',{exact:true}).fill(question);
+  await page.getByRole('button',{name:/情境 · 提醒 · 行动/}).click();
+  await expect(page.getByRole('button',{name:'开始抽牌',exact:true}),'账户确认前不可触发访客抽牌').toBeDisabled();
+ }finally{releaseSession();}
+ await expect(page.getByRole('button',{name:'开始抽牌',exact:true})).toBeEnabled();
  const drawing=write(page,'/api/v1/readings','POST');
  await page.getByRole('button',{name:'开始抽牌',exact:true}).click();
  const reading=await succeeded(await drawing,201);
