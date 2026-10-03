@@ -13,7 +13,7 @@ export function JournalEditor({entry,onDirty}:{entry:DailyRecord;onDirty?:(dirty
  const dirty=note!==baseline.note||mood!==baseline.mood;
  const blocker=useBlocker(({currentLocation,nextLocation})=>dirty&&(currentLocation.pathname!==nextLocation.pathname||currentLocation.search!==nextLocation.search));
  useEffect(()=>{onDirty?.(dirty);return()=>onDirty?.(false);},[dirty,onDirty]);
- useEffect(()=>{if(!dirty&&entry.journal.version!==baseline.version){setBaseline(entry.journal);setNote(entry.journal.note);setMood(entry.journal.mood);}},[entry.id,entry.journal.version,dirty,baseline.version]);
+ useEffect(()=>{if(!dirty&&entry.journal.version>baseline.version){setBaseline(entry.journal);setNote(entry.journal.note);setMood(entry.journal.mood);}},[entry.id,entry.journal.version,dirty,baseline.version]);
  useEffect(()=>{if(dirty)setSaved(false);},[dirty]);
  useLayoutEffect(()=>{if(!dirty)return;const block=(e:BeforeUnloadEvent)=>{e.preventDefault();};window.addEventListener('beforeunload',block);return()=>window.removeEventListener('beforeunload',block);},[dirty]);
  const loadCloud=async()=>{if(dirty&&!window.confirm('加载云端内容会替换当前草稿，请先复制需要保留的文字。确认继续？'))return;setLoadingCloud(true);setCloudError(null);try{const value=await api<DailyRecord>('/daily/'+entry.id);setBaseline(value.journal);setNote(value.journal.note);setMood(value.journal.mood);cache.setQueryData(['daily-entry',user?.id,value.id],value);cache.setQueryData<DailyRecord>(['daily',user?.id],current=>current?.id===value.id?value:current);save.reset();setSaved(false);}catch(e){setCloudError(e);}finally{setLoadingCloud(false);}};
