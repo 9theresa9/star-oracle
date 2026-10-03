@@ -140,7 +140,7 @@ export class OracleService {
   if(claimed.count!==1)throw new ConflictException('这份解读正在生成，请稍后刷新');
   try{
    const reading=decodeReading(original).reading;
-   const result=await requestModel({userId,requestId:modelRequestId??initialInterpretationId(id),question:reading.question,evidence:evidenceFor(reading)});
+   const result=await requestModel({userId,requestId:modelRequestId??initialInterpretationId(id),readingId:id,question:reading.question,evidence:evidenceFor(reading)});
    await db.$transaction(async tx=>{
     const saved=await tx.reading.updateMany({where:{id,userId,ai:false,aiStatus:'pending',aiStartedAt:started},data:{interpretation:seal(JSON.stringify(result),'interpretation:'+userId+':'+id),ai:true,aiStatus:'done'}});
     if(saved.count!==1)throw new ConflictException('记录状态已改变，请刷新');
@@ -193,7 +193,7 @@ export class OracleService {
    const record=decodeReading(owned);
    const recent=await db.readingConversation.findMany({where:{userId,readingId,status:'done'},orderBy:[{createdAt:'desc'},{id:'desc'}],take:6});
    const context=JSON.stringify({originalQuestion:record.reading.question,originalInterpretation:{summary:record.interpretation.summary.slice(0,1000),reflection:record.interpretation.reflection.slice(0,300)},history:recent.reverse().map(item=>{const value=decodeConversation(item);return {prompt:value.prompt,answer:{summary:value.answer!.summary.slice(0,800),reflection:value.answer!.reflection.slice(0,200)}};})});
-   const answer=await requestModel({userId,requestId:input.requestId,question:input.prompt.trim(),evidence:evidenceFor(record.reading),context});
+   const answer=await requestModel({userId,requestId:input.requestId,readingId,question:input.prompt.trim(),evidence:evidenceFor(record.reading),context});
    await db.$transaction(async tx=>{
     const changed=await tx.readingConversation.updateMany({where:{id,userId,readingId,status:'pending',pendingSince:started},data:{answerCipher:seal(JSON.stringify(answer),'conversation-answer:'+userId+':'+id),status:'done',pendingSince:null}});
     if(changed.count!==1)throw new ConflictException('追问状态已改变，请刷新');

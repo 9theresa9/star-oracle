@@ -1,14 +1,23 @@
-import { test,before,after } from 'node:test';
+import { test,before,after,beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn,type ChildProcess } from 'node:child_process';
 import { createServer as httpsServer,type Server as HTTPSServer } from 'node:https';
 import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { db,redis,seal,open,chinaDate,connectRedis } from '../src/infrastructure.js';
-import { SPREADS,SCENARIOS,castNumberLines,castTimeLines,drawTarot,type Reading } from '@star-oracle/domain';
+import { SPREADS,SCENARIOS,castNumberLines,castTimeLines,drawTarot,evidenceFor,type Reading } from '@star-oracle/domain';
+import { requestModel } from '../src/model.service.js';
 let child:ChildProcess,model:HTTPSServer,providerCalls=0;
 const base='http://127.0.0.1:3113',origin='http://localhost:5173';
 const createdUsers:string[]=[];
+let budgetSnapshot:{date:string;requests:number|null};
+function assertEphemeralInfrastructure(){
+ if(process.env.NODE_ENV!=='test')throw new Error('Redis test isolation requires NODE_ENV=test');
+ for(const name of ['DATABASE_URL','REDIS_URL']){
+  const hostname=new URL(process.env[name]??'').hostname;
+  if(!['localhost','127.0.0.1','[::1]','::1'].includes(hostname))throw new Error('Redis test isolation requires loopback database and Redis URLs');
+ }
+}
 const providerInputs:{question:string;evidence:{reference:string}[];context?:string}[]=[];
 async function request(path:string,{cookie='',method='GET',body}:{cookie?:string;method?:string;body?:unknown}={}){
  return fetch(base+path,{method,headers:{'Content-Type':'application/json',Origin:origin,...(cookie?{Cookie:cookie}:{})},...(body!==undefined?{body:JSON.stringify(body)}:{})});
@@ -25,7 +34,10 @@ async function draw(cookie:string,overrides:Record<string,unknown>={}){
  assert.equal(response.status,201);return response.json();
 }
 before(async()=>{
+ assertEphemeralInfrastructure();
  await connectRedis();
+ const budgetDate=chinaDate(),budget=await db.aIUsage.findUnique({where:{date:budgetDate}});
+ budgetSnapshot={date:budgetDate,requests:budget?.requests??null};
  if(process.env.MOCK_TLS_CERT&&process.env.MOCK_TLS_KEY){
   model=httpsServer({cert:readFileSync(process.env.MOCK_TLS_CERT),key:readFileSync(process.env.MOCK_TLS_KEY)},async(req,res)=>{
    let body='';for await(const chunk of req)body+=chunk;
@@ -41,9 +53,14 @@ before(async()=>{
  for(let i=0;i<100;i++){try{if((await request('/api/v1/health')).ok)return;}catch{}await new Promise(r=>setTimeout(r,100));}
  throw new Error('Oracle expansion API failed to start');
 });
+beforeEach(async()=>{assertEphemeralInfrastructure();await redis.flushdb();});
 after(async()=>{
  child?.kill('SIGTERM');if(model)await new Promise<void>(resolve=>model.close(()=>resolve()));
  if(createdUsers.length)await db.user.deleteMany({where:{id:{in:createdUsers}}});
+ if(budgetSnapshot){
+  if(budgetSnapshot.requests===null)await db.aIUsage.deleteMany({where:{date:budgetSnapshot.date}});
+  else await db.aIUsage.upsert({where:{date:budgetSnapshot.date},create:{date:budgetSnapshot.date,requests:budgetSnapshot.requests},update:{requests:budgetSnapshot.requests}});
+ }
  await db.$disconnect();redis.disconnect();
 });
 test('expanded casts preserve legacy requests and canonical server results',async()=>{
@@ -53,7 +70,7 @@ test('expanded casts preserve legacy requests and canonical server results',asyn
  assert.equal(Object.keys(SPREADS).length,32);assert.equal(Object.keys(SCENARIOS).length,15);
  const legacy=await draw(owner.cookie,{spread:'single'});assert.equal(legacy.reading.cards.length,1);
  const full=await draw(owner.cookie,{spread:'celtic-cross',scenario:'decision'});assert.equal(full.reading.cards.length,10);assert.equal(full.reading.scenario,'decision');
- const annual=await draw(owner.cookie,{spread:'year-wheel',scenario:'annual'});assert.equal(annual.reading.cards.length,12);assert.equal(new Set(annual.reading.cards.map((x:{id:string})=>x.id)).size,12);
+ const annual=await draw(owner.cookie,{spread:'year-wheel',scenario:'annual'});assert.equal(annual.reading.cards.length,13);assert.equal(new Set(annual.reading.cards.map((x:{id:string})=>x.id)).size,13);
  const input={kind:'iching',question:'我可以如何面对当前的转变？',method:'numbers',numbers:[12,36,5],requestId:randomUUID()};
  const numberResponse=await request('/api/v1/readings',{cookie:owner.cookie,method:'POST',body:input});
  assert.equal(numberResponse.status,201);const number=await numberResponse.json();
@@ -107,9 +124,19 @@ test('private metadata, optimistic updates and bounded encrypted search keep eve
 });
 test('follow-up AI remains on the owned cast, is idempotent, encrypted and budgeted atomically',{skip:!process.env.MOCK_TLS_CERT},async()=>{
  const owner=await register('follow-up-owner'),other=await register('follow-up-other'),record=await draw(owner.cookie);
- const initial=await request('/api/v1/readings/'+record.id+'/interpret',{cookie:owner.cookie,method:'POST',body:{consent:true,requestId:randomUUID()}});
+ const initialRequestId=randomUUID();
+ const initial=await request('/api/v1/readings/'+record.id+'/interpret',{cookie:owner.cookie,method:'POST',body:{consent:true,requestId:initialRequestId}});
  assert.equal(initial.status,200);assert.equal((await initial.json()).ai,true);
  const before=providerCalls;
+ const cached=await db.aIRequest.findUniqueOrThrow({where:{userId_requestId:{userId:owner.id,requestId:initialRequestId}}});
+ assert.equal(cached.status,'done');assert.equal(cached.readingId,record.id);
+ const allowanceForRestore=await db.aIAllowance.count({where:{userId:owner.id}});
+ // Emulate a process interruption after the provider result was committed but
+ // before the reading projection was saved. Retrying restores the cache only.
+ await db.reading.update({where:{id:record.id},data:{ai:false,aiStatus:'idle',aiStartedAt:null,interpretation:null}});
+ const restored=await request('/api/v1/readings/'+record.id+'/interpret',{cookie:owner.cookie,method:'POST',body:{consent:true,requestId:initialRequestId}});
+ assert.equal(restored.status,200);assert.equal((await restored.json()).ai,true);
+ assert.equal(providerCalls,before);assert.equal(await db.aIAllowance.count({where:{userId:owner.id}}),allowanceForRestore);
  assert.equal((await request('/api/v1/readings/'+record.id+'/interpret',{cookie:owner.cookie,method:'POST',body:{consent:true,requestId:randomUUID()}})).status,200);
  assert.equal(providerCalls,before);
  const input={prompt:'围绕刚才的结果，我怎样安排第一步？',consent:true,requestId:randomUUID()};
@@ -131,6 +158,10 @@ test('follow-up AI remains on the owned cast, is idempotent, encrypted and budge
  const listed=await request('/api/v1/readings/'+record.id+'/conversation',{cookie:owner.cookie}).then(r=>r.json());assert.equal(listed.items[0].id,turn.id);
  assert.equal((await request('/api/v1/readings/'+record.id+'/conversation',{cookie:other.cookie})).status,404);
  const otherRecord=await draw(other.cookie);
+ const sourceRequestId=randomUUID(),allowanceBeforeSource=await db.aIAllowance.count({where:{userId:owner.id}});
+ await assert.rejects(requestModel({userId:owner.id,requestId:sourceRequestId,readingId:otherRecord.id,question:'不得使用他人的记录',evidence:evidenceFor(record.reading)}),(error:unknown)=>(error as {getStatus?:()=>number}).getStatus?.()===404);
+ assert.equal(await db.aIRequest.count({where:{userId:owner.id,requestId:sourceRequestId}}),0);assert.equal(await db.aIAllowance.count({where:{userId:owner.id}}),allowanceBeforeSource);
+ await redis.del('limit:ai:user:'+owner.id);
  assert.equal((await request('/api/v1/readings/'+otherRecord.id+'/conversation?cursor='+turn.id,{cookie:other.cookie})).status,404);
  const invalid={prompt:'请返回坏引用用于验证固定证据',consent:true,requestId:randomUUID()};
  const bad=await request('/api/v1/readings/'+record.id+'/conversation',{cookie:owner.cookie,method:'POST',body:invalid});assert.equal(bad.status,503);
@@ -159,6 +190,11 @@ test('follow-up AI remains on the owned cast, is idempotent, encrypted and budge
  await db.readingConversation.create({data:{id:staleId,userId:owner.id,readingId:record.id,requestId:randomUUID(),promptCipher:seal('中断的追问','conversation-prompt:'+owner.id+':'+staleId),status:'pending',pendingSince:new Date(Date.now()-130000)}});
  const history=await request('/api/v1/readings/'+record.id+'/conversation',{cookie:owner.cookie}).then(r=>r.json());
  assert.equal(history.items.find((x:{id:string})=>x.id===staleId).status,'failed');
+ const privateCaches=await db.aIRequest.findMany({where:{readingId:record.id,userId:owner.id},select:{requestId:true}});
+ assert.ok(privateCaches.some(row=>row.requestId===initialRequestId));assert.ok(privateCaches.some(row=>row.requestId===input.requestId));
+ const allowancesBeforeDelete=await db.aIAllowance.count({where:{userId:owner.id}});
  await request('/api/v1/readings/'+record.id,{cookie:owner.cookie,method:'DELETE',body:{}});
+ assert.equal(await db.aIRequest.count({where:{userId:owner.id,readingId:record.id}}),0,'deleting a reading removes its private initial and follow-up model cache');
+ assert.equal(await db.aIAllowance.count({where:{userId:owner.id}}),allowancesBeforeDelete,'deletion retains non-content accounting entries');
  assert.equal(await db.readingConversation.count({where:{readingId:record.id}}),0,'deleting an owned cast cascades its private conversation');
 });
