@@ -1,4 +1,4 @@
-import { useEffect,useState } from 'react';
+import { useEffect,useState,useRef } from 'react';
 import { Download,Image } from 'lucide-react';
 import { TAROT_DECK,SPREADS,analyseLines,type Reading } from '@star-oracle/domain';
 import { Button,Notice } from './ui';
@@ -30,9 +30,11 @@ async function makePoster(reading:Reading,includeQuestion:boolean):Promise<Blob>
  return new Promise((resolve,reject)=>canvas.toBlob(blob=>blob?resolve(blob):reject(new Error('生成失败，请稍后再试')),'image/png'));
 }
 export function SharePoster({reading}:{reading:Reading}){
+ const active=useRef(true);
+ useEffect(()=>{active.current=true;return()=>{active.current=false;};},[]);
  const [includeQuestion,setIncludeQuestion]=useState(false),[url,setUrl]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState<unknown>(null);
  useEffect(()=>()=>{if(url)URL.revokeObjectURL(url);},[url]);
  useEffect(()=>{setUrl('');setIncludeQuestion(false);},[reading.id]);
- async function generate(){setBusy(true);setError(null);try{const blob=await makePoster(reading,includeQuestion);setUrl(URL.createObjectURL(blob));}catch(e){setError(e);}finally{setBusy(false);}}
- return <details className="oracle-details poster-panel"><summary><Image size={16}/>制作分享海报</summary><p className="muted small">图片仅在你的浏览器生成，默认包含牌面或卦象，不含问题、AI 对话和日记。保存后请自行选择分享对象。</p><label className="checkbox"><input type="checkbox" checked={includeQuestion} onChange={e=>{setIncludeQuestion(e.target.checked);setUrl('');}}/>我主动选择在海报中显示本次问题</label><div className="record-actions"><Button className="secondary" onClick={generate} busy={busy}>生成 PNG 海报</Button>{url?<a className="button" href={url} download={'star-oracle-'+reading.id.slice(0,8)+'.png'}><Download size={16}/>保存图片</a>:null}</div><Notice error={error}/>{url?<><img className="poster-preview" src={url} alt={includeQuestion?'包含本次问题的占卜分享海报预览':'不含问题的占卜分享海报预览'}/><p className="muted small">手机也可以长按预览图片保存。</p></>:null}</details>;
+ async function generate(){setBusy(true);setError(null);try{const blob=await makePoster(reading,includeQuestion);if(active.current)setUrl(URL.createObjectURL(blob));}catch(e){if(active.current)setError(e);}finally{if(active.current)setBusy(false);}}
+ return <details className="oracle-details poster-panel"><summary><Image size={16}/>制作分享海报</summary><p className="muted small">图片仅在你的浏览器生成，默认包含牌面或卦象，不含问题、AI 对话和日记。保存后请自行选择分享对象。</p><label className="checkbox"><input type="checkbox" disabled={busy} checked={includeQuestion} onChange={e=>{setIncludeQuestion(e.target.checked);setUrl('');}}/>我主动选择在海报中显示本次问题</label><div className="record-actions"><Button className="secondary" onClick={generate} busy={busy}>生成 PNG 海报</Button>{url?<a className="button" href={url} download={'star-oracle-'+reading.id.slice(0,8)+'.png'}><Download size={16}/>保存图片</a>:null}</div><Notice error={error}/>{url?<><img className="poster-preview" src={url} alt={includeQuestion?'包含本次问题的占卜分享海报预览':'不含问题的占卜分享海报预览'}/><p className="muted small">手机也可以长按预览图片保存。</p></>:null}</details>;
 }
