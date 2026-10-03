@@ -2,6 +2,10 @@ import { test,expect,type Page,type Response,type TestInfo } from './fixtures';
 import { PrismaClient } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 
+// This flow delays a real network request; service workers must not bypass its route.
+// Dedicated PWA tests keep their own worker behavior enabled.
+test.use({serviceWorkers:'block'});
+
 function write(page:Page,path:string,method:'POST'|'PATCH'|'DELETE'){
  return page.waitForResponse(response=>new URL(response.url()).pathname===path&&response.request().method()===method);
 }
@@ -78,27 +82,45 @@ test('saved explorations, private calendar, actions, reviews and export survive 
  await expect(page.getByRole('status').filter({hasText:'已保存到你的私人记录'})).toBeVisible();
  expect(daily.journal.note).toBe(journal);
 
- // Hold the real account response while the new page is usable. A saved exploration
- // must never silently become a guest result because session loading is slower.
- let releaseSession!:()=>void,sessionRequested!:()=>void;
- const sessionBarrier=new Promise<void>(resolve=>{releaseSession=resolve;});
- const requestedSession=new Promise<void>(resolve=>{sessionRequested=resolve;});
- await page.route('**/api/v1/me',async route=>{
-  sessionRequested();
-  await sessionBarrier;
-  await route.continue();
- },{times:1});
- try{
-  await page.goto('/tarot');
-  await requestedSession;
-  await page.getByLabel('此刻，你想探索什么？',{exact:true}).fill(question);
-  await page.getByRole('button',{name:/情境 · 提醒 · 行动/}).click();
-  await expect(page.getByRole('button',{name:'开始抽牌',exact:true}),'账户确认前不可触发访客抽牌').toBeDisabled();
- }finally{releaseSession();}
- await expect(page.getByRole('button',{name:'开始抽牌',exact:true})).toBeEnabled();
+ // Keep the real account request pending without making document readiness depend on it.
+ // The bounded observation gives a useful failure if the browser never routes the request.
+ await test.step('真实会话延迟期间禁止访客回退',async()=>{
+  let releaseSession!:()=>void,sessionSeen=false;
+  const sessionBarrier=new Promise<void>(resolve=>{releaseSession=resolve;});
+  await page.route('**/api/v1/me',async route=>{
+   sessionSeen=true;
+   console.log('PERSONAL_STAGE '+info.project.name+' session-request-held');
+   await sessionBarrier;
+   await route.continue();
+  },{times:1});
+  try{
+   await test.step('页面可交互时观察未完成的真实会话请求',async()=>{
+    console.log('PERSONAL_STAGE '+info.project.name+' tarot-navigation-start');
+    await page.goto('/tarot',{waitUntil:'domcontentloaded'});
+    const serviceWorkerControlled=await page.evaluate(()=>!!navigator.serviceWorker?.controller);
+    console.log('PERSONAL_STAGE '+info.project.name+' tarot-dom-ready serviceWorkerControlled='+serviceWorkerControlled);
+    expect(serviceWorkerControlled,'网络注入测试应使用没有 Service Worker 控制的独立上下文').toBe(false);
+    await expect.poll(()=>sessionSeen,{timeout:10000,message:'真实会话请求应被延迟拦截观察到'}).toBe(true);
+   });
+   await test.step('确认账户之前无法提交抽牌',async()=>{
+    await page.getByLabel('此刻，你想探索什么？',{exact:true}).fill(question);
+    await page.getByRole('button',{name:/情境 · 提醒 · 行动/}).click();
+    await expect(page.getByRole('button',{name:'开始抽牌',exact:true}),'账户确认前不可触发访客抽牌').toBeDisabled();
+    console.log('PERSONAL_STAGE '+info.project.name+' pending-draw-disabled');
+   });
+  }finally{
+   releaseSession();
+   console.log('PERSONAL_STAGE '+info.project.name+' session-request-released');
+  }
+  await test.step('真实账户确认恢复云端抽牌',async()=>{
+   await expect(page.getByRole('button',{name:'开始抽牌',exact:true})).toBeEnabled();
+   console.log('PERSONAL_STAGE '+info.project.name+' account-confirmed');
+  });
+ });
  const drawing=write(page,'/api/v1/readings','POST');
  await page.getByRole('button',{name:'开始抽牌',exact:true}).click();
  const reading=await succeeded(await drawing,201);
+ console.log('PERSONAL_STAGE '+info.project.name+' cloud-reading-persisted');
  expect(reading.reading.spread).toBe('three');
  expect(reading.reading.cards).toHaveLength(3);
  await expect(page.getByRole('heading',{name:question,exact:true})).toBeVisible();
