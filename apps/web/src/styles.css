@@ -16,3 +16,6 @@
 .art-card.front{transform:rotate(9deg)}
 
 .star-mark{display:block;width:1em;height:1em}.brand-icon{display:inline-flex}.giant-star{display:block}
+
+/* Keep mobile form text readable without triggering Safari focus zoom. */
+@media(max-width:760px){.page :is(input,textarea,select):not([type="checkbox"]):not([type="radio"]){font-size:max(16px,1em)}}
