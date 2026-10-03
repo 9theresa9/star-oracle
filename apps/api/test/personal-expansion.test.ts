@@ -135,7 +135,7 @@ test('deleting an owned review removes its private AI cache and keeps consumed a
  assert.equal(await db.aIAllowance.count({where:{userId:owner.id,requestId}}),1,'nonprivate allowance usage remains accounted');
 });
 
-test('report recovery reuses its encrypted original input after diary changes without billing again',{skip:!process.env.AI_API_KEY},async()=>{
+test('report recovery reuses its encrypted original input after diary changes without billing again',async()=>{
  const owner=await user('snapshot-owner'),id=randomUUID(),requestId=randomUUID(),entryId=randomUUID();
  const evidence=[{reference:'period',name:'原始记录',position:'统计',keywords:['星笺 1 天']}];
  const snapshot={question:'请回顾原始记录。',evidence,context:JSON.stringify({daily:[{date:'2026-10-02',note:'ORIGINAL-PRIVATE-SNAPSHOT'}],journalIncluded:true})};
