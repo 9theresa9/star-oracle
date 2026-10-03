@@ -1,4 +1,4 @@
-import { test,expect,type Page,type Response,type TestInfo } from '@playwright/test';
+import { test,expect,type Page,type Response,type TestInfo } from './fixtures';
 
 function write(page:Page,path:string,method:'POST'|'PATCH'|'DELETE'){
  return page.waitForResponse(response=>new URL(response.url()).pathname===path&&response.request().method()===method);

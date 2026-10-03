@@ -14,3 +14,5 @@ export const test=base.extend<{rateIsolation:void}>({
  },{auto:true}]
 });
 export {expect};
+
+export type { Page, Response, TestInfo } from '@playwright/test';

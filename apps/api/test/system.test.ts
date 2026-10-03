@@ -21,6 +21,10 @@ async function register(label:string) {
 }
 before(async()=>{
  await connectRedis();
+ const testDatabase=new URL(process.env.DATABASE_URL??''),testRedis=new URL(process.env.REDIS_URL??'');
+ const isLocal=(host:string)=>['127.0.0.1','localhost','[::1]'].includes(host);
+ if(process.env.NODE_ENV!=='test'||!isLocal(testDatabase.hostname)||!isLocal(testRedis.hostname)||testDatabase.pathname!=='/star_oracle')throw new Error('System fixtures require isolated loopback test services');
+ await redis.flushdb();
  if(process.env.MOCK_TLS_CERT&&process.env.MOCK_TLS_KEY){
  model=httpsServer({cert:readFileSync(process.env.MOCK_TLS_CERT),key:readFileSync(process.env.MOCK_TLS_KEY)},async(req,res)=>{
   let text='';for await(const chunk of req)text+=chunk;
