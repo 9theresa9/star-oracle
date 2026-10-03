@@ -33,6 +33,7 @@ export async function requestModel(input:ModelRequest):Promise<Interpretation> {
  const where={userId_requestId:{userId:input.userId,requestId:input.requestId}};
  const previous=await db.aIRequest.findUnique({where});
  if(previous){
+  if(previous.readingId!==(input.readingId??null)||previous.reportId!==(input.reportId??null))throw new ConflictException('请求标识已用于其他来源');
   if(previous.fingerprint!==fingerprint)throw new ConflictException('请求标识已用于其他内容');
   if(previous.status==='done')return decodeResult(previous);
   if(previous.status==='failed')throw new ServiceUnavailableException('本次尝试未完成，请选择重新尝试');
