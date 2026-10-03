@@ -5,6 +5,7 @@ import { db,redis,connectRedis,seal,open,chinaDate } from '../src/infrastructure
 import { PersonalService,periodRange,validDate } from '../src/personal.service.js';
 import { MembershipService,consumeAIAllowance } from '../src/membership.service.js';
 import { TAROT_DECK } from '@star-oracle/domain';
+import { modelFingerprint } from '../src/model.service.js';
 import { AdminService } from '../src/admin.service.js';
 const personal=new PersonalService(),membership=new MembershipService(),admin=new AdminService();
 const ids:string[]=[];
@@ -76,6 +77,9 @@ test('redeem codes have atomic max-use limits, owner-only ledger and revocable p
  const row=await db.redeemCode.findUniqueOrThrow({where:{id:code.item.id}});assert.equal(row.usedCount,1);assert.ok(!JSON.stringify(await membership.codes({limit:50})).includes(code.code));assert.ok(!JSON.stringify(await membership.codes({limit:50})).includes(row.codeHash));
  const winner=(await membership.get(a.id)).credits===3?a:b,loser=winner.id===a.id?b:a;
  const ledger=await membership.ledger(winner.id,{limit:20});assert.equal(ledger.items[0]!.amount,3);
+ const redemptions=await membership.redemptions(winner.id,{limit:20});assert.equal(redemptions.items[0]!.codeId,code.item.id);assert.equal(redemptions.items[0]!.codeHint,code.item.codeHint);assert.ok(!JSON.stringify(redemptions).includes(row.codeHash));assert.ok(!JSON.stringify(redemptions).includes(code.code));
+ await assert.rejects(()=>membership.redemptions(loser.id,{cursor:redemptions.items[0]!.id,limit:20}),/兑换记录不存在/);
+ const exported=await personal.export(winner.id);assert.equal(exported.redemptions.length,1);assert.equal(exported.redemptions[0]!.amount,3);assert.ok(!JSON.stringify(exported).includes(row.codeHash));
  await assert.rejects(()=>membership.ledger(loser.id,{cursor:ledger.items[0]!.id,limit:20}),/额度记录不存在/);
  await assert.rejects(()=>membership.redeem(winner.id,code.code,randomUUID()),/已使用过/);
  const plus=await membership.assign(manager.id,winner.id,{tier:'plus',expiresAt:new Date(Date.now()+86400000).toISOString()},randomUUID());assert.equal(plus.dailyLimit,20);
@@ -97,7 +101,7 @@ test('account deletion cascades private actions, journals, reports, conversation
  await db.reading.create({data:{id:readingId,userId:owner.id,kind:'tarot',question:seal('PRIVATE-CASCADE','question:'+owner.id+':'+readingId),payload:reading,requestId:randomUUID()}});
  await personal.createAction(owner.id,{title:'cascade action',readingId},randomUUID());
  await personal.createFeedback(owner.id,{category:'other',body:'cascade feedback'},randomUUID());
- await db.dailyEntry.create({data:{id:entryId,userId:owner.id,date:chinaDate(),payload:reading,note:seal('cascade diary','journal:'+owner.id+':'+entryId)}});
+ await db.dailyEntry.create({data:{id:entryId,userId:owner.id,date:chinaDate(),payload:{...reading,question:'今天可以怎样照顾自己？'},note:seal('cascade diary','journal:'+owner.id+':'+entryId)}});
  await db.reviewReport.create({data:{id:reportId,userId:owner.id,period:'week',startDate:'2026-09-28',endDate:'2026-10-04',includeJournal:false,requestId:randomUUID(),status:'failed'}});
  await db.readingConversation.create({data:{id:chatId,userId:owner.id,readingId,promptCipher:seal('cascade prompt','conversation-prompt:'+owner.id+':'+chatId),requestId:randomUUID(),status:'failed'}});
  await consumeAIAllowance(owner.id,randomUUID());
@@ -107,4 +111,60 @@ test('account deletion cascades private actions, journals, reports, conversation
  const where={userId:owner.id};
  const remaining=await Promise.all([db.reading.count({where}),db.dailyEntry.count({where}),db.actionPlan.count({where}),db.feedback.count({where}),db.reviewReport.count({where}),db.readingConversation.count({where}),db.membership.count({where}),db.userAIUsage.count({where}),db.aIAllowance.count({where}),db.creditLedger.count({where})]);
  assert.deepEqual(remaining,Array(10).fill(0));
+});
+
+test('allowance accounting uses one captured Shanghai day across a midnight boundary',async()=>{
+ const owner=await user('fixed-day-owner'),requestId=randomUUID(),capturedDay='2026-01-02';
+ await consumeAIAllowance(owner.id,requestId,undefined,capturedDay);
+ await consumeAIAllowance(owner.id,requestId,undefined,'2026-01-03');
+ const usage=await db.userAIUsage.findMany({where:{userId:owner.id}});
+ assert.equal(usage.length,1);assert.equal(usage[0]!.date,capturedDay);assert.equal(usage[0]!.requests,1);
+});
+
+test('deleting an owned review removes its private AI cache and keeps consumed allowance history',async()=>{
+ const owner=await user('delete-report-owner'),other=await user('delete-report-other'),id=randomUUID(),requestId=randomUUID();
+ const result={summary:'真实记录回顾',insights:[{reference:'period',text:'观察实际记录。'}],actions:['记录一个行动。','观察后再调整。'],reflection:'什么值得保留？'};
+ await db.reviewReport.create({data:{id,userId:owner.id,period:'week',startDate:'2026-09-28',endDate:'2026-10-04',includeJournal:true,requestId,status:'done',inputCipher:seal('PRIVATE-SNAPSHOT-NOT-FOR-EXPORT','review-input:'+owner.id+':'+id),resultCipher:seal(JSON.stringify(result),'review:'+owner.id+':'+id)}});
+ await db.aIRequest.create({data:{id:randomUUID(),userId:owner.id,requestId,reportId:id,fingerprint:'a'.repeat(64),status:'done',resultCipher:seal(JSON.stringify(result),'ai-request:'+owner.id+':'+requestId)}});
+ await consumeAIAllowance(owner.id,requestId);
+ await assert.rejects(()=>personal.reports(other.id,{cursor:id,limit:20}),/回顾不存在/);
+ await assert.rejects(()=>personal.removeReport(other.id,id,randomUUID()),/回顾不存在/);
+ const exported=await personal.export(owner.id);assert.equal(exported.reports[0]!.result!.summary,result.summary);assert.ok(!JSON.stringify(exported).includes('PRIVATE-SNAPSHOT-NOT-FOR-EXPORT'));assert.ok(!JSON.stringify(exported).includes('inputCipher'));
+ await personal.removeReport(owner.id,id,randomUUID());
+ assert.equal(await db.reviewReport.count({where:{id}}),0);assert.equal(await db.aIRequest.count({where:{userId:owner.id,requestId}}),0);
+ assert.equal(await db.aIAllowance.count({where:{userId:owner.id,requestId}}),1,'nonprivate allowance usage remains accounted');
+});
+
+test('report recovery reuses its encrypted original input after diary changes without billing again',async()=>{
+ const owner=await user('snapshot-owner'),id=randomUUID(),requestId=randomUUID(),entryId=randomUUID();
+ const evidence=[{reference:'period',name:'原始记录',position:'统计',keywords:['星笺 1 天']}];
+ const snapshot={question:'请回顾原始记录。',evidence,context:JSON.stringify({daily:[{date:'2026-10-02',note:'ORIGINAL-PRIVATE-SNAPSHOT'}],journalIncluded:true})};
+ const result={summary:'原始快照的已完成回顾',insights:[{reference:'period',text:'基于原始记录整理。'}],actions:['记录可验证的行动。','观察之后再调整。'],reflection:'这段时间什么值得保留？'};
+ await db.reviewReport.create({data:{id,userId:owner.id,period:'week',startDate:'2026-09-28',endDate:'2026-10-04',includeJournal:true,requestId,status:'pending',inputCipher:seal(JSON.stringify(snapshot),'review-input:'+owner.id+':'+id)}});
+ const modelInput={userId:owner.id,requestId,reportId:id,...snapshot};
+ await db.aIRequest.create({data:{id:randomUUID(),userId:owner.id,requestId,reportId:id,fingerprint:modelFingerprint(modelInput),status:'done',resultCipher:seal(JSON.stringify(result),'ai-request:'+owner.id+':'+requestId)}});
+ await consumeAIAllowance(owner.id,requestId);
+ const reading={version:1,id:entryId,createdAt:new Date().toISOString(),question:'今天如何照顾自己？',kind:'tarot',spread:'single',cards:[{id:TAROT_DECK[0]!.id,reversed:false}]};
+ await db.dailyEntry.create({data:{id:entryId,userId:owner.id,date:'2026-10-02',payload:reading,note:seal('CHANGED-DIARY-AFTER-PROVIDER','journal:'+owner.id+':'+entryId)}});
+ const usageBefore=await db.userAIUsage.findUniqueOrThrow({where:{userId_date:{userId:owner.id,date:chinaDate()}}});
+ const globalBefore=(await db.aIUsage.findUnique({where:{date:chinaDate()}}))?.requests??0;
+ const recovered=await personal.report(owner.id,{period:'week',date:'2026-10-03',includeJournal:true,consent:true,requestId},randomUUID());
+ assert.equal(recovered.status,'done');assert.deepEqual(recovered.result,result);
+ assert.equal((await db.userAIUsage.findUniqueOrThrow({where:{userId_date:{userId:owner.id,date:chinaDate()}}})).requests,usageBefore.requests);
+ assert.equal((await db.aIUsage.findUnique({where:{date:chinaDate()}}))?.requests??0,globalBefore);
+ const saved=await db.reviewReport.findUniqueOrThrow({where:{id}});
+ const decrypted=open(saved.inputCipher!,'review-input:'+owner.id+':'+id);assert.ok(decrypted.includes('ORIGINAL-PRIVATE-SNAPSHOT'));assert.ok(!decrypted.includes('CHANGED-DIARY'));
+ assert.throws(()=>open(saved.inputCipher!,'review-input:'+owner.id+':'+randomUUID()),'snapshots cannot move between reports');
+ assert.ok(!JSON.stringify(await personal.reports(owner.id,{limit:20})).includes('ORIGINAL-PRIVATE-SNAPSHOT'));
+});
+test('a completed AI cache belonging to a different report cannot recover this report',async()=>{
+ const owner=await user('scope-owner'),id=randomUUID(),otherId=randomUUID(),requestId=randomUUID(),otherRequestId=randomUUID();
+ const snapshot={question:'回顾记录',evidence:[{reference:'period',name:'本期',position:'统计'}],context:'{}'};
+ await db.reviewReport.createMany({data:[
+  {id,userId:owner.id,period:'week',startDate:'2026-09-28',endDate:'2026-10-04',includeJournal:false,requestId,status:'pending',inputCipher:seal(JSON.stringify(snapshot),'review-input:'+owner.id+':'+id)},
+  {id:otherId,userId:owner.id,period:'week',startDate:'2026-09-28',endDate:'2026-10-04',includeJournal:false,requestId:otherRequestId,status:'done'}
+ ]});
+ await db.aIRequest.create({data:{id:randomUUID(),userId:owner.id,requestId,reportId:otherId,fingerprint:'b'.repeat(64),status:'done'}});
+ await assert.rejects(()=>personal.report(owner.id,{period:'week',date:'2026-10-03',includeJournal:false,consent:true,requestId},randomUUID()),/请求标识已用于其他内容/);
+ assert.equal((await db.reviewReport.findUniqueOrThrow({where:{id}})).status,'pending');
 });

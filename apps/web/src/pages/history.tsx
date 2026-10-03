@@ -20,7 +20,7 @@ function MetaEditor({item,onDirty}:{item:RecordItem;onDirty:(dirty:boolean)=>voi
  const invalid=parsedTags.length>8||parsedTags.some(t=>t.length>24);
  const setFrom=(value:RecordItem)=>{setBaseline(value);setFavorite(value.favorite);setTags(value.tags.join('、'));setNote(value.note);};
  useEffect(()=>{onDirty(dirty);return()=>onDirty(false);},[dirty,onDirty]);
- useEffect(()=>{if(!dirty&&item.metadataVersion!==baseline.metadataVersion)setFrom(item);},[item.metadataVersion,baseline.metadataVersion,dirty]);
+ useEffect(()=>{if(!dirty&&item.metadataVersion>baseline.metadataVersion)setFrom(item);},[item.metadataVersion,baseline.metadataVersion,dirty]);
  useEffect(()=>{if(dirty)setSaved(false);},[dirty]);
  const save=useMutation({mutationFn:()=>api<RecordItem>('/readings/'+item.id+'/metadata',{method:'PATCH',body:json({favorite,tags:parsedTags,note,version:baseline.metadataVersion})}),onSuccess:value=>{setFrom(value);setSaved(true);void cache.invalidateQueries({queryKey:['history',user?.id]});}});
  const reload=async()=>{if(dirty&&!window.confirm('加载云端版本会替换当前草稿。你可以先复制备注，确认继续？'))return;setLoading(true);setLoadError(null);try{setFrom(await api<RecordItem>('/readings/'+item.id));save.reset();setSaved(false);}catch(e){setLoadError(e);}finally{setLoading(false);}};

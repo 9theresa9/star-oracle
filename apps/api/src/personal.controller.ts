@@ -24,6 +24,7 @@ export class PersonalController {
  @Get('calendar') calendar(@Req()req:AppRequest,@Query(new SchemaPipe(CalendarQuery))query:{month:string}){return this.personal.calendar(req.actor.id,query.month);}
  @Get('insights') insights(@Req()req:AppRequest,@Query(new SchemaPipe(PeriodQuery))query:{period:Period;date:string}){return this.personal.insights(req.actor.id,query.period,query.date);}
  @Get('insights/reports') reports(@Req()req:AppRequest,@Query(new SchemaPipe(PageQuery))page:{cursor?:string;limit:number}){return this.personal.reports(req.actor.id,page);}
+ @Delete('insights/reports/:id') removeReport(@Req()req:AppRequest,@Param('id',new ParseUUIDPipe())id:string){return this.personal.removeReport(req.actor.id,id,req.requestId);}
  @Post('insights/reports') report(@Req()req:AppRequest,@Body(new SchemaPipe(ReportCreate))input:ReportInput){return this.personal.report(req.actor.id,input,req.requestId);}
  @Get('actions') actions(@Req()req:AppRequest,@Query(new SchemaPipe(ActionPage))page:{cursor?:string;limit:number;status:'all'|'open'|'done'}){return this.personal.actions(req.actor.id,page);}
  @Get('actions/:id') action(@Req()req:AppRequest,@Param('id',new ParseUUIDPipe())id:string){return this.personal.action(req.actor.id,id);}
@@ -33,6 +34,7 @@ export class PersonalController {
  @Get('feedback') feedback(@Req()req:AppRequest,@Query(new SchemaPipe(PageQuery))page:{cursor?:string;limit:number}){return this.personal.feedback(req.actor.id,page);}
  @Post('feedback') createFeedback(@Req()req:AppRequest,@Body(new SchemaPipe(FeedbackCreate))input:FeedbackInput){return this.personal.createFeedback(req.actor.id,input,req.requestId);}
  @Get('membership') member(@Req()req:AppRequest){return this.membership.get(req.actor.id);}
+ @Get('membership/redemptions') redemptions(@Req()req:AppRequest,@Query(new SchemaPipe(PageQuery))page:{cursor?:string;limit:number}){return this.membership.redemptions(req.actor.id,page);}
  @Get('membership/ledger') ledger(@Req()req:AppRequest,@Query(new SchemaPipe(PageQuery))page:{cursor?:string;limit:number}){return this.membership.ledger(req.actor.id,page);}
  @Get('membership/payment-options') paymentOptions(){return this.membership.paymentOptions();}
  @Post('membership/redeem') redeem(@Req()req:AppRequest,@Body(new SchemaPipe(RedeemInput))input:{code:string}){return this.membership.redeem(req.actor.id,input.code,req.requestId);}

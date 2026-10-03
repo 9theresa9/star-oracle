@@ -14,11 +14,11 @@ async function retryTransaction<T>(work:(tx:Prisma.TransactionClient)=>Promise<T
 function activeTier(row:{tier:string;expiresAt:Date|null}|null,now=new Date()):'free'|'plus' {
  return row?.tier==='plus'&&row.expiresAt!==null&&row.expiresAt>now?'plus':'free';
 }
-export async function consumeAIAllowance(userId:string,requestId:string,transaction?:Prisma.TransactionClient):Promise<void> {
+export async function consumeAIAllowance(userId:string,requestId:string,transaction?:Prisma.TransactionClient,accountingDay=chinaDate()):Promise<void> {
  const work=async(tx:Prisma.TransactionClient)=>{
   if(await tx.aIAllowance.findUnique({where:{userId_requestId:{userId,requestId}}}))return;
   const member=await tx.membership.upsert({where:{userId},create:{userId},update:{}});
-  const date=chinaDate(),limit=activeTier(member)==='plus'?20:5;
+  const date=accountingDay,limit=activeTier(member)==='plus'?20:5;
   await tx.userAIUsage.upsert({where:{userId_date:{userId,date}},create:{id:randomUUID(),userId,date},update:{}});
   const daily=await tx.userAIUsage.updateMany({where:{userId,date,requests:{lt:limit}},data:{requests:{increment:1}}});
   let source='daily';
@@ -72,6 +72,11 @@ export class MembershipService {
    await tx.auditLog.create({data:{id:randomUUID(),actorId:userId,action:'membership.redeem',targetId:row.id,requestId}});
   });
   return this.get(userId);
+ }
+ async redemptions(userId:string,page:{cursor?:string;limit:number}){
+  if(page.cursor&&!await db.redemption.findFirst({where:{id:page.cursor,userId}}))throw new NotFoundException('兑换记录不存在');
+  const rows=await db.redemption.findMany({where:{userId},take:page.limit+1,orderBy:[{createdAt:'desc'},{id:'desc'}],...(page.cursor?{cursor:{id:page.cursor},skip:1}:{}),select:{id:true,createdAt:true,codeId:true,code:{select:{codeHint:true,kind:true,amount:true,durationDays:true}}}});
+  return {items:rows.slice(0,page.limit).map(({code,...row})=>({...row,...code,createdAt:row.createdAt.toISOString()})),nextCursor:rows.length>page.limit?rows[page.limit-1]!.id:null};
  }
  async ledger(userId:string,page:{cursor?:string;limit:number}){
   if(page.cursor&&!await db.creditLedger.findFirst({where:{id:page.cursor,userId}}))throw new NotFoundException('额度记录不存在');

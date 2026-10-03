@@ -1,4 +1,4 @@
-import { ConflictException, HttpException, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
+import { ConflictException, HttpException, ServiceUnavailableException, UnauthorizedException, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { createHash, createHmac, randomUUID } from 'node:crypto';
 import { validateInterpretationForEvidence, type Evidence, type Interpretation } from '@star-oracle/domain';
@@ -7,7 +7,7 @@ import { db, redis, seal, open, chinaDate, consumeLimit, acquireAILease } from '
 import { consumeAIAllowance } from './membership.service.js';
 import { RateLimitException } from './exceptions.js';
 
-export type ModelRequest={userId:string;requestId:string;question:string;evidence:Evidence[];context?:string};
+export type ModelRequest={userId:string;requestId:string;question:string;evidence:Evidence[];context?:string;readingId?:string;reportId?:string};
 // Preserve a stable default for legacy consent-only clients. New clients send a
 // fresh requestId only when the user explicitly starts a new attempt.
 export function initialInterpretationId(readingId:string):string {
@@ -19,17 +19,21 @@ function canonical(value:unknown):unknown {
  if(value!==null&&typeof value==='object')return Object.fromEntries(Object.entries(value).sort(([a],[b])=>a.localeCompare(b)).map(([key,item])=>[key,canonical(item)]));
  return value;
 }
+export function modelFingerprint(input:ModelRequest):string {
+ return createHmac('sha256',Buffer.from(config.DATA_ENCRYPTION_KEY,'hex')).update(JSON.stringify(canonical({question:input.question,evidence:input.evidence,context:input.context??'',readingId:input.readingId??null,reportId:input.reportId??null}))).digest('hex');
+}
 function decodeResult(row:{userId:string;requestId:string;resultCipher:string|null}):Interpretation {
  if(!row.resultCipher)throw new ServiceUnavailableException('AI 结果暂时不可用');
  return JSON.parse(open(row.resultCipher,'ai-request:'+row.userId+':'+row.requestId)) as Interpretation;
 }
 export async function requestModel(input:ModelRequest):Promise<Interpretation> {
- if(!config.AI_API_KEY)throw new ServiceUnavailableException('AI 尚未配置，基础解读仍可使用');
+ if(input.readingId&&input.reportId)throw new ConflictException('AI 请求来源无效');
  if(input.question.length>2000||(input.context?.length??0)>16000||!input.evidence.length||input.evidence.length>32||new Set(input.evidence.map(x=>x.reference)).size!==input.evidence.length)throw new ConflictException('AI 请求内容无效');
- const fingerprint=createHmac('sha256',Buffer.from(config.DATA_ENCRYPTION_KEY,'hex')).update(JSON.stringify(canonical({question:input.question,evidence:input.evidence,context:input.context??''}))).digest('hex');
+ const fingerprint=modelFingerprint(input);
  const where={userId_requestId:{userId:input.userId,requestId:input.requestId}};
  const previous=await db.aIRequest.findUnique({where});
  if(previous){
+  if(previous.readingId!==(input.readingId??null)||previous.reportId!==(input.reportId??null))throw new ConflictException('请求标识已用于其他来源');
   if(previous.fingerprint!==fingerprint)throw new ConflictException('请求标识已用于其他内容');
   if(previous.status==='done')return decodeResult(previous);
   if(previous.status==='failed')throw new ServiceUnavailableException('本次尝试未完成，请选择重新尝试');
@@ -41,6 +45,7 @@ export async function requestModel(input:ModelRequest):Promise<Interpretation> {
   }
   throw new ConflictException('这次解读正在生成，请稍后刷新');
  }
+ if(!config.AI_API_KEY)throw new ServiceUnavailableException('AI 尚未配置，基础解读仍可使用');
  if(!await consumeLimit('ai:user:'+input.userId,3,60))throw new RateLimitException('AI 请求较多，请稍后再试');
  const lease=await acquireAILease();
  if(!lease)throw new RateLimitException('AI 正在忙，请稍后再试');
@@ -55,12 +60,14 @@ export async function requestModel(input:ModelRequest):Promise<Interpretation> {
     await db.$transaction(async tx=>{
      const owner=await tx.user.findUnique({where:{id:input.userId},select:{disabled:true}});
      if(!owner||owner.disabled)throw new UnauthorizedException('账户不可用');
+     if(input.readingId&&!await tx.reading.findFirst({where:{id:input.readingId,userId:input.userId},select:{id:true}}))throw new NotFoundException('记录不存在');
+     if(input.reportId&&!await tx.reviewReport.findFirst({where:{id:input.reportId,userId:input.userId},select:{id:true}}))throw new NotFoundException('回顾不存在');
      const existing=await tx.aIRequest.findUnique({where});
      if(existing)throw new ConflictException('这次解读已开始，请稍后刷新');
-     await tx.aIRequest.create({data:{id:requestRowId,userId:input.userId,requestId:input.requestId,fingerprint,status:'pending',pendingSince:started,reservedDay:day}});
+     await tx.aIRequest.create({data:{id:requestRowId,userId:input.userId,requestId:input.requestId,fingerprint,readingId:input.readingId??null,reportId:input.reportId??null,status:'pending',pendingSince:started,reservedDay:day}});
      const reserved=await tx.aIUsage.updateMany({where:{date:day,requests:{lt:config.AI_DAILY_LIMIT}},data:{requests:{increment:1}}});
      if(reserved.count!==1)throw new RateLimitException('今天的 AI 额度已用完');
-     await consumeAIAllowance(input.userId,input.requestId,tx);
+     await consumeAIAllowance(input.userId,input.requestId,tx,day);
     },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable,timeout:10000});
     claimed=true;break;
    }catch(error){
