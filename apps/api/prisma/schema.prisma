@@ -21,6 +21,16 @@ model User {
   twoFactors TwoFactor[]
   readings Reading[]
   daily DailyEntry[]
+  actions ActionPlan[]
+  feedback Feedback[]
+  membership Membership?
+  aiUsage UserAIUsage[]
+  aiAllowances AIAllowance[]
+  aiRequests AIRequest[]
+  conversations ReadingConversation[]
+  redemptions Redemption[]
+  reviewReports ReviewReport[]
+  creditLedger CreditLedger[]
   @@map("user")
 }
 model Session {
@@ -86,6 +96,12 @@ model Reading {
   interpretation String? @db.LongText
   ai Boolean @default(false)
   shared Boolean @default(false)
+  favorite Boolean @default(false)
+  tagsCipher String? @db.Text
+  annotation String? @db.Text
+  metadataVersion Int @default(0)
+  conversations ReadingConversation[]
+  actions ActionPlan[]
   requestId String @db.VarChar(36)
   aiStatus String @default("idle") @db.VarChar(16)
   aiStartedAt DateTime?
@@ -127,4 +143,170 @@ model AIUsage {
   requests Int @default(0)
   updatedAt DateTime @updatedAt
   @@map("ai_usage")
+}
+
+model AIRequest {
+  id String @id @db.VarChar(36)
+  userId String @db.VarChar(36)
+  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+  requestId String @db.VarChar(36)
+  status String @default("idle") @db.VarChar(16)
+  pendingSince DateTime?
+  reservedDay String? @db.VarChar(10)
+  fingerprint String @db.VarChar(64)
+  resultCipher String? @db.LongText
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@unique([userId,requestId])
+  @@index([userId,createdAt])
+  @@map("ai_request")
+}
+model ReadingConversation {
+  id String @id @db.VarChar(36)
+  userId String @db.VarChar(36)
+  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+  readingId String @db.VarChar(36)
+  reading Reading @relation(fields:[readingId],references:[id],onDelete:Cascade)
+  promptCipher String @db.Text
+  answerCipher String? @db.LongText
+  requestId String @db.VarChar(36)
+  status String @default("pending") @db.VarChar(16)
+  pendingSince DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@unique([userId,requestId])
+  @@index([userId,readingId,createdAt])
+  @@map("reading_conversation")
+}
+model ActionPlan {
+  id String @id @db.VarChar(36)
+  userId String @db.VarChar(36)
+  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+  readingId String? @db.VarChar(36)
+  reading Reading? @relation(fields:[readingId],references:[id],onDelete:SetNull)
+  titleCipher String @db.Text
+  detailCipher String? @db.Text
+  dueDate String? @db.VarChar(10)
+  completedAt DateTime?
+  version Int @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([userId,createdAt])
+  @@index([userId,dueDate])
+  @@map("action_plan")
+}
+model Feedback {
+  id String @id @db.VarChar(36)
+  userId String @db.VarChar(36)
+  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+  category String @db.VarChar(16)
+  bodyCipher String @db.Text
+  status String @default("open") @db.VarChar(16)
+  adminReplyCipher String? @db.Text
+  version Int @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([userId,createdAt])
+  @@index([status,createdAt])
+  @@map("feedback")
+}
+model SiteContent {
+  id String @id @db.VarChar(36)
+  slug String @unique @db.VarChar(80)
+  kind String @db.VarChar(24)
+  title String @db.VarChar(160)
+  body String @db.Text
+  published Boolean @default(false)
+  version Int @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([published,kind,createdAt])
+  @@map("site_content")
+}
+model Membership {
+  userId String @id @db.VarChar(36)
+  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+  tier String @default("free") @db.VarChar(16)
+  expiresAt DateTime?
+  credits Int @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@map("membership")
+}
+model UserAIUsage {
+  id String @id @db.VarChar(36)
+  userId String @db.VarChar(36)
+  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+  date String @db.VarChar(10)
+  requests Int @default(0)
+  updatedAt DateTime @updatedAt
+  @@unique([userId,date])
+  @@map("user_ai_usage")
+}
+model AIAllowance {
+  id String @id @db.VarChar(36)
+  userId String @db.VarChar(36)
+  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+  requestId String @db.VarChar(36)
+  source String @default("daily") @db.VarChar(16)
+  creditsSpent Int @default(0)
+  createdAt DateTime @default(now())
+  @@unique([userId,requestId])
+  @@index([userId,createdAt])
+  @@map("ai_allowance")
+}
+model RedeemCode {
+  id String @id @db.VarChar(36)
+  codeHash String @unique @db.VarChar(64)
+  codeHint String @db.VarChar(20)
+  kind String @db.VarChar(16)
+  amount Int
+  durationDays Int?
+  expiresAt DateTime?
+  maxUses Int @default(1)
+  usedCount Int @default(0)
+  disabled Boolean @default(false)
+  createdAt DateTime @default(now())
+  redemptions Redemption[]
+  @@map("redeem_code")
+}
+model Redemption {
+  id String @id @db.VarChar(36)
+  userId String @db.VarChar(36)
+  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+  codeId String @db.VarChar(36)
+  code RedeemCode @relation(fields:[codeId],references:[id],onDelete:Restrict)
+  createdAt DateTime @default(now())
+  @@unique([userId,codeId])
+  @@map("redemption")
+}
+model CreditLedger {
+  id String @id @db.VarChar(36)
+  userId String @db.VarChar(36)
+  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+  kind String @db.VarChar(32)
+  amount Int
+  balance Int
+  requestId String? @db.VarChar(36)
+  createdAt DateTime @default(now())
+  @@unique([userId,requestId])
+  @@index([userId,createdAt])
+  @@map("credit_ledger")
+}
+model ReviewReport {
+  id String @id @db.VarChar(36)
+  userId String @db.VarChar(36)
+  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+  period String @db.VarChar(16)
+  startDate String @db.VarChar(10)
+  endDate String @db.VarChar(10)
+  includeJournal Boolean @default(false)
+  requestId String @db.VarChar(36)
+  resultCipher String? @db.LongText
+  status String @default("pending") @db.VarChar(16)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@unique([userId,requestId])
+  @@index([userId,createdAt])
+  @@map("review_report")
 }
