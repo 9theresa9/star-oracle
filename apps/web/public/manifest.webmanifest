@@ -1,0 +1,14 @@
+{
+  "id": "/",
+  "name": "照见 · Star Oracle",
+  "short_name": "照见",
+  "description": "留一点安静，听见自己。塔罗、易经与私人星笺。",
+  "lang": "zh-CN",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "theme_color": "#17101f",
+  "background_color": "#17101f",
+  "icons": [{"src":"/pwa-icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]
+}
