@@ -10,7 +10,7 @@ GPT Sites 的 Worker 运行环境不能承载本项目的 Nest 进程、MySQL �
 
 ## 正式部署步骤
 
-1. 获取全面功能分支用于review/测试。[架构PR #3](https://github.com/9theresa9/star-oracle/pull/3) 与 [功能PR #4](https://github.com/9theresa9/star-oracle/pull/4) 当前未合并；正式上线前先完成review，再固定已确认的完整提交SHA，不自动跟随开发分支：
+1. 获取全面功能分支用于review/测试。[完整版本 PR #4](https://github.com/9theresa9/star-oracle/pull/4) 直接面向 `main`，尚未合并；旧 PR #1–#3 已由它取代。正式上线前先完成review，再固定已确认的完整提交SHA，不自动跟随开发分支：
    ```bash
    git clone https://github.com/9theresa9/star-oracle.git
    cd star-oracle

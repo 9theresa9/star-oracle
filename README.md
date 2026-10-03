@@ -2,7 +2,7 @@
 
 独立 React 前端 + NestJS API + MySQL 8.4 + Redis 7.4，提供塔罗、易经、学习图鉴、私人记录与管理后台，适配桌面和手机。
 
-当前全面功能更新在 `feat/comprehensive-oracle` 分支，基于已完成的 `feat/production-architecture` 架构升级。GitHub review 不会自动修改主分支或已部署的 Worker 原型；新版正式上线仍需服务器、域名、SMTP、模型凭据与环境验收。
+当前全部功能集中在 `feat/comprehensive-oracle` 分支，[PR #4](https://github.com/9theresa9/star-oracle/pull/4) 直接面向 `main`，包含已完成的生产架构升级及全部功能。[分支说明](docs/BRANCHES.md) 与 [实际界面](docs/REVIEW_SCREENSHOTS.md) 可直接查看。GitHub review 不会自动修改主分支或已部署的 Worker 原型；新版正式上线仍需服务器、域名、SMTP、模型凭据与环境验收。
 
 ## 功能
 

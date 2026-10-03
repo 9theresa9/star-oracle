@@ -10,4 +10,4 @@
 8. public/sw.js 与 infra/nginx.conf：公开静态缓存范围、API绕过和安全头；不能缓存认证或私人响应。
 9. GitHub Actions：真实MySQL/Redis与浏览器、新旧迁移、容器及加密恢复，以最后成功的源提交为准。
 
-本PR基于生产架构分支便于只看这次扩展，不自动合并主分支或替换线上原型。模型测试为受控HTTPS服务，邮件为隔离Mailpit，不把测试称为真实商户付款或生产上线。
+本 PR 直接面向 main，包含此前架构升级与全部功能；旧 PR #1–#3 已关闭并由此 PR 取代。[分支与历史](BRANCHES.md)、[实际截图](REVIEW_SCREENSHOTS.md) 已集中到当前开发分支。模型测试为受控HTTPS服务，邮件为隔离Mailpit，不把测试称为真实商户付款或生产上线。
