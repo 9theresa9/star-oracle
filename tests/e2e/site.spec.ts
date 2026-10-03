@@ -1,0 +1,63 @@
+import { test,expect } from './fixtures';
+test('home, guest tarot and six-line ritual fit the viewport',async({page},info)=>{
+ await page.goto('/');
+ await expect(page.getByRole('heading',{name:/抬头看星.*回身看见自己/})).toBeVisible();
+ await expect(page.locator('.hero>.reveal')).toHaveCSS('opacity','1');
+ if(process.env.CI_VISUAL_REVIEW==='true'&&info.project.name!=='small-chromium')console.log('UI_PREVIEW_'+info.project.name+' '+(await page.screenshot({type:'jpeg',quality:65,animations:'disabled'})).toString('base64'));
+ await page.screenshot({animations:'disabled',path:'test-results/home-'+info.project.name+'.png',fullPage:true});
+ await page.getByRole('link',{name:'开启一次探索'}).click();
+ await page.getByLabel('此刻，你想探索什么？').fill('这次新的机会，我可以留意什么？');
+ await page.getByRole('button',{name:'开始抽牌'}).click();
+ await expect(page.getByRole('heading',{name:'这次新的机会，我可以留意什么？'})).toBeVisible();
+ await expect(page.locator('.tarot-card')).toHaveCount(3);
+ await page.screenshot({animations:'disabled',path:'test-results/tarot-'+info.project.name+'.png',fullPage:true});
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBeTruthy();
+ await page.goto('/iching');
+ await page.getByLabel('此刻，你想探索什么？').fill('眼前的变化，需要怎样应对？');
+ await page.getByRole('button',{name:'开始起卦'}).click();
+ // Wait for each visible state transition before the next toss, as a person would.
+ for(let i=0;i<6;i++){
+  await page.getByRole('button',{name:'掷三枚铜钱'}).click();
+  await expect(page.locator('.hex-line.shown')).toHaveCount(i+1);
+ }
+ await expect(page.locator('.hex-line.shown')).toHaveCount(6);
+ await expect(page.getByRole('heading',{name:'眼前的变化，需要怎样应对？'})).toBeVisible();
+ await page.screenshot({animations:'disabled',path:'test-results/iching-'+info.project.name+'.png',fullPage:true});
+});
+test('account, cloud daily and private journal work end to end',async({page},info)=>{
+ await page.goto('/account');
+ await page.getByRole('button',{name:'创建新账户'}).click();
+ await page.getByLabel('怎么称呼你').fill('星空旅人');
+ const email='browser-'+info.project.name+'-'+Date.now()+'@example.com';
+ await page.getByLabel('邮箱',{exact:true}).fill(email);
+ await page.getByLabel('密码',{exact:true}).fill('browser-test-password-123');
+ await page.getByRole('button',{name:'创建账户',exact:true}).click();
+ // Test environment disables email verification; sign in explicitly for consistent behavior.
+ await expect(page.getByRole('button',{name:'登录',exact:true})).toBeVisible();
+ await page.getByLabel('邮箱',{exact:true}).fill(email);
+ await page.getByLabel('密码',{exact:true}).fill('browser-test-password-123');
+ await page.getByRole('button',{name:'登录',exact:true}).click();
+ await expect(page.locator('.daily-letter')).toBeVisible();
+ await page.getByRole('button',{name:'平静',exact:true}).click();
+ await page.getByLabel('私人日记',{exact:true}).fill('今天想慢一点，听听自己的声音。');
+ const secondSaveResponse=page.waitForResponse(response=>response.url().includes('/journal')&&response.request().method()==='PATCH'&&response.status()===200);
+ await page.getByRole('button',{name:'保存',exact:true}).click();
+ await secondSaveResponse;
+ await expect(page.getByRole('status')).toContainText('已保存');
+ await page.screenshot({animations:'disabled',path:'test-results/daily-'+info.project.name+'.png',fullPage:true});
+ await page.reload();
+ await expect(page.getByLabel('私人日记',{exact:true})).toHaveValue('今天想慢一点，听听自己的声音。');
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBeTruthy();
+ await page.getByLabel('私人日记',{exact:true}).fill('尚未保存的私人草稿');
+ if(info.project.name!=='desktop-chromium')await page.getByRole('button',{name:'打开导航'}).click();
+ await page.getByRole('navigation').getByRole('link',{name:'记录',exact:true}).click();
+ await expect(page.getByRole('alertdialog',{name:'日记尚未保存'})).toBeVisible();
+ await page.getByRole('button',{name:'留在这里'}).click();
+ await expect(page.getByLabel('私人日记',{exact:true})).toHaveValue('尚未保存的私人草稿');
+ const draftSaveResponse=page.waitForResponse(response=>response.url().includes('/journal')&&response.request().method()==='PATCH'&&response.status()===200);
+ await page.getByRole('button',{name:'保存',exact:true}).click();
+ await draftSaveResponse;
+ await expect(page.getByRole('status')).toContainText('已保存');
+ await page.goto('/admin');
+ await expect(page.getByRole('heading',{name:'需要管理员权限'})).toBeVisible();
+});

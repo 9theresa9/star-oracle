@@ -1,0 +1,105 @@
+name: Production architecture verification
+on:
+  push:
+    branches: [main, feat/production-architecture, feat/comprehensive-oracle]
+  pull_request:
+    paths: ['apps/**', 'packages/**', 'compose*.yml', 'infra/**', 'tests/e2e/**', 'package*.json', '.github/workflows/production-verify.yml']
+permissions:
+  contents: read
+concurrency:
+  group: production-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: integration-root-password
+          MYSQL_DATABASE: star_oracle
+          MYSQL_USER: oracle
+          MYSQL_PASSWORD: integration-db-password
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pintegration-root-password"
+          --health-interval=10s --health-timeout=5s --health-retries=15
+      mailpit:
+        image: axllent/mailpit:v1.31.3
+        ports: ['1025:1025', '8025:8025']
+      redis:
+        image: redis:7.4
+        ports: ['6379:6379']
+        options: --health-cmd="redis-cli ping" --health-interval=5s --health-timeout=3s --health-retries=10
+    env:
+      NODE_ENV: test
+      PORT: 3111
+      WEB_ORIGIN: http://localhost:5173
+      API_PUBLIC_URL: http://localhost:5173
+      DATABASE_URL: mysql://oracle:integration-db-password@127.0.0.1:3306/star_oracle
+      REDIS_URL: redis://127.0.0.1:6379
+      AUTH_SECRET: integration-test-secret-12345678901234567890
+      DATA_ENCRYPTION_KEY: 1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef
+      REQUIRE_EMAIL_VERIFICATION: 'false'
+      ADMIN_REQUIRE_2FA: 'false'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run db:generate
+      - run: npm run db:migrate -w @star-oracle/api
+      - name: Verify committed migrations match the Prisma schema
+        run: npx prisma migrate diff --from-url "$DATABASE_URL" --to-schema-datamodel apps/api/prisma/schema.prisma --exit-code
+      - name: Inspect dependency advisories
+        run: npm audit --audit-level=high
+      - run: npm run typecheck
+      - run: npm run build
+      - name: Create local TLS fixture for model contract tests
+        run: |
+          mkdir -p /tmp/star-oracle-tls
+          openssl req -x509 -newkey rsa:2048 -nodes -keyout /tmp/star-oracle-tls/key.pem -out /tmp/star-oracle-tls/cert.pem -days 1 -subj '/CN=localhost' -addext 'subjectAltName=DNS:localhost' >/dev/null 2>&1
+      - run: npm test
+        env:
+          AI_API_KEY: integration-model-fixture
+          AI_BASE_URL: https://localhost:3443/v1
+          AI_DAILY_LIMIT: '3'
+          NODE_EXTRA_CA_CERTS: /tmp/star-oracle-tls/cert.pem
+          MOCK_TLS_CERT: /tmp/star-oracle-tls/cert.pem
+          MOCK_TLS_KEY: /tmp/star-oracle-tls/key.pem
+          MAILPIT_URL: http://127.0.0.1:8025
+      - name: Audit runtime dependencies
+        run: npm audit --omit=dev --audit-level=high
+      - run: npx playwright install --with-deps chromium webkit
+      - name: Reset only ephemeral integration Redis before browser accounts
+        run: node --input-type=module -e 'import {Redis} from "ioredis"; const client=new Redis(process.env.REDIS_URL); await client.flushdb(); client.disconnect();'
+      - run: npm run test:e2e
+        env:
+          CI_VISUAL_REVIEW: 'true'
+          CI_REVIEW_DETAIL: 'true'
+          CI_VISUAL_REVIEW_DETAIL: 'true'
+      - name: Validate production Docker builds and isolated stack
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y age
+          bash scripts/container-smoke.sh
+      - name: Record verified revision
+        if: always()
+        run: git rev-parse HEAD > verified-revision.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: production-review
+          path: |
+            verified-revision.txt
+            test-results/
+            playwright-report/
+            apps/web/dist/
+            apps/api/prisma/migrations/
+          retention-days: 14

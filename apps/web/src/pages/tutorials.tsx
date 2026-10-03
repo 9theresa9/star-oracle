@@ -1,0 +1,16 @@
+import { useEffect,useState } from 'react';
+import { Link } from 'react-router-dom';
+import { ArrowUpRight,BookOpen,Check } from 'lucide-react';
+import { TUTORIALS } from '@star-oracle/domain';
+import { useSession } from '../lib/session';
+import { Reveal } from '../components/ui';
+import './divination.css';
+function readProgress(key:string){try{const value=JSON.parse(localStorage.getItem(key)??'[]');return new Set<string>(Array.isArray(value)?value.filter((item:unknown)=>typeof item==='string'):[]);}catch{return new Set<string>();}}
+const categories=[['all','全部课程'],['tarot','塔罗入门'],['iching','易经入门'],['practice','反思与实践']] as const;
+export function Tutorials(){
+ const {user}=useSession(),key='star-oracle-tutorials-'+(user?.id??'guest'),[completed,setCompleted]=useState(()=>readProgress(key)),[category,setCategory]=useState('all');
+ useEffect(()=>{setCompleted(readProgress(key));},[key]);
+ function toggle(id:string){setCompleted(current=>{const next=new Set(current);next.has(id)?next.delete(id):next.add(id);try{localStorage.setItem(key,JSON.stringify([...next]));}catch{}return next;});}
+ const total=TUTORIALS.reduce((sum,t)=>sum+t.steps.length,0),done=TUTORIALS.reduce((sum,t)=>sum+t.steps.filter((_,i)=>completed.has(t.id+':'+i)).length,0);
+ return <Reveal className="page narrow tutorials-page"><span className="eyebrow">LEARN / A LITTLE AT A TIME</span><h1>慢慢读懂，慢慢练习。</h1><p className="page-intro">从提问、看牌和认爻开始。把占卜当成整理思路的工具，让最后的决定回到你手中。</p><div className="learning-progress"><BookOpen size={24}/><div><p>你的学习足迹 · {done}/{total} 步</p><progress max={total||1} value={done} aria-label="学习完成进度"/></div><span className="muted small">本机保存</span></div><div className="spread-filters" aria-label="课程分类">{categories.map(([id,label])=><button type="button" key={id} className={category===id?'active':''} aria-pressed={category===id} onClick={()=>setCategory(id)}>{label}</button>)}</div><div className="tutorial-list">{TUTORIALS.filter(item=>category==='all'||item.category===category).map((tutorial,index)=>{const complete=tutorial.steps.every((_,i)=>completed.has(tutorial.id+':'+i));return <article className="tutorial-card" key={tutorial.id}><div className="tutorial-heading"><span className="step-number">{String(index+1).padStart(2,'0')}</span><div><span className="eyebrow">{tutorial.category==='tarot'?'TAROT':tutorial.category==='iching'?'I CHING':'PRACTICE'}</span><h2>{tutorial.title}</h2></div>{complete?<span className="tutorial-complete"><Check size={15}/>已完成</span>:null}</div><p>{tutorial.description}</p><ol className="tutorial-steps">{tutorial.steps.map((step,i)=><li key={i}><label><input type="checkbox" checked={completed.has(tutorial.id+':'+i)} onChange={()=>toggle(tutorial.id+':'+i)}/><span><strong>步骤 {i+1}</strong>{step}</span></label></li>)}</ol></article>;})}</div><div className="tutorial-footer"><h2>学一点，也试一点。</h2><p>挑一个此刻真实的问题，再把发现写进自己的生活。</p><div className="record-actions"><Link className="button" to="/tarot">开始塔罗探索 <ArrowUpRight size={16}/></Link><Link className="button secondary" to="/iching">尝试易经起卦</Link><Link className="text-link" to="/library">打开完整图鉴</Link></div></div><p className="disclaimer">学习进度只保存在此浏览器，不会自动上传；清除浏览器数据会清除进度。本站不教授医疗诊断或确定性的命运预测。</p></Reveal>;
+}
