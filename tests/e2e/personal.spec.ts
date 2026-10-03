@@ -10,11 +10,27 @@ async function succeeded(response:Response,status=200){
  return response.json();
 }
 async function fits(page:Page){
- expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),'页面应适合当前屏幕，不能出现横向溢出').toBeTruthy();
+ const viewport=await page.evaluate(()=>({
+  fits:document.documentElement.scrollWidth<=window.innerWidth,
+  scale:window.visualViewport?.scale??1,
+  offsetLeft:window.visualViewport?.offsetLeft??0,
+  scrollX:window.scrollX,scrollY:window.scrollY,innerWidth:window.innerWidth,innerHeight:window.innerHeight,
+  visual:window.visualViewport?{width:window.visualViewport.width,height:window.visualViewport.height,offsetTop:window.visualViewport.offsetTop,pageLeft:window.visualViewport.pageLeft,pageTop:window.visualViewport.pageTop}:null
+ }));
+ if(process.env.CI_REVIEW_DETAIL==='true'&&(!viewport.fits||Math.abs(viewport.scale-1)>=0.005||Math.abs(viewport.offsetLeft)>1||Math.abs(viewport.scrollX)>1))console.log('PERSONAL_VIEWPORT_ANOMALY '+JSON.stringify(viewport));
+ expect(viewport.fits,'页面应适合当前屏幕，不能出现横向溢出').toBeTruthy();
+ expect(viewport.scale,'没有缩放手势时，输入与导航不应自动放大页面').toBeCloseTo(1,2);
+ expect(Math.abs(viewport.offsetLeft),'可视区域不能向左右偏移').toBeLessThanOrEqual(1);
+ expect(Math.abs(viewport.scrollX),'页面不能发生横向滚动').toBeLessThanOrEqual(1);
 }
 async function capture(page:Page,info:TestInfo,name:'history'|'insights'|'space'){
- await page.evaluate(()=>window.scrollTo({top:0,behavior:'instant'}));
+ // Check the actual viewport before blur so the overview capture cannot hide input zoom.
+ await fits(page);
+ await page.evaluate(()=>{if(document.activeElement instanceof HTMLElement)document.activeElement.blur();window.scrollTo({top:0,left:0,behavior:'instant'});});
+ await expect.poll(()=>page.evaluate(()=>window.scrollY),'完整页面截图应从页面顶部开始').toBe(0);
+ await fits(page);
  await expect(page.locator('main .reveal')).toHaveCSS('opacity','1');
+ if(process.env.CI_REVIEW_DETAIL==='true')console.log('PERSONAL_VIEWPORT_'+name+'_'+info.project.name+' '+JSON.stringify(await page.evaluate(()=>({innerWidth:window.innerWidth,innerHeight:window.innerHeight,scrollX:window.scrollX,scrollY:window.scrollY,visual:window.visualViewport?{width:window.visualViewport.width,height:window.visualViewport.height,scale:window.visualViewport.scale,offsetLeft:window.visualViewport.offsetLeft,offsetTop:window.visualViewport.offsetTop,pageLeft:window.visualViewport.pageLeft,pageTop:window.visualViewport.pageTop}:null}))));
  const file=info.outputPath('personal-'+name+'.png');
  await page.screenshot({animations:'disabled',fullPage:true,path:file});
  await info.attach(name,{path:file,contentType:'image/png'});
