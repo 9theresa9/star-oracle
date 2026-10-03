@@ -1,6 +1,6 @@
 import type { ZodType } from 'zod';
-import type { Reading,Interpretation,SpreadId } from '@star-oracle/domain';
-export type CreateReadingInput={kind:'tarot'|'iching';question:string;spread:SpreadId;allowReversed:boolean;requestId:string;scenario:string;method:'coins'|'numbers'|'time';numbers?:[number,number,number];time?:string};
+import type { Reading,Interpretation,SpreadId,ScenarioId } from '@star-oracle/domain';
+export type CreateReadingInput={kind:'tarot'|'iching';question:string;spread:SpreadId;allowReversed:boolean;requestId:string;scenario:ScenarioId;method:'coins'|'numbers'|'time';numbers?:[number,number,number];time?:string};
 export type JournalData={note:string;mood:'calm'|'hopeful'|'tired'|'restless'|'low'|null;version:number};
 export const CreateReading:ZodType<CreateReadingInput>;
 export const JournalInput:ZodType<JournalData>;

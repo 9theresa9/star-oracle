@@ -1,7 +1,7 @@
 name: Production architecture verification
 on:
   push:
-    branches: [main, feat/production-architecture]
+    branches: [main, feat/production-architecture, feat/comprehensive-oracle]
   pull_request:
     paths: ['apps/**', 'packages/**', 'compose*.yml', 'infra/**', 'tests/e2e/**', 'package*.json', '.github/workflows/production-verify.yml']
 permissions:
@@ -55,6 +55,8 @@ jobs:
       - run: npm ci
       - run: npm run db:generate
       - run: npm run db:migrate -w @star-oracle/api
+      - name: Verify committed migrations match the Prisma schema
+        run: npx prisma migrate diff --from-url "$DATABASE_URL" --to-schema-datamodel apps/api/prisma/schema.prisma --exit-code
       - name: Inspect dependency advisories
         run: npm audit --audit-level=high
       - run: npm run typecheck
