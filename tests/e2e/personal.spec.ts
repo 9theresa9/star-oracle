@@ -2,6 +2,10 @@ import { test,expect,type Page,type Response,type TestInfo } from './fixtures';
 import { PrismaClient } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 
+// This flow delays a real network request; service workers must not bypass its route.
+// Dedicated PWA tests keep their own worker behavior enabled.
+test.use({serviceWorkers:'block'});
+
 function write(page:Page,path:string,method:'POST'|'PATCH'|'DELETE'){
  return page.waitForResponse(response=>new URL(response.url()).pathname===path&&response.request().method()===method);
 }
@@ -93,7 +97,9 @@ test('saved explorations, private calendar, actions, reviews and export survive 
    await test.step('页面可交互时观察未完成的真实会话请求',async()=>{
     console.log('PERSONAL_STAGE '+info.project.name+' tarot-navigation-start');
     await page.goto('/tarot',{waitUntil:'domcontentloaded'});
-    console.log('PERSONAL_STAGE '+info.project.name+' tarot-dom-ready');
+    const serviceWorkerControlled=await page.evaluate(()=>!!navigator.serviceWorker?.controller);
+    console.log('PERSONAL_STAGE '+info.project.name+' tarot-dom-ready serviceWorkerControlled='+serviceWorkerControlled);
+    expect(serviceWorkerControlled,'网络注入测试应使用没有 Service Worker 控制的独立上下文').toBe(false);
     await expect.poll(()=>sessionSeen,{timeout:10000,message:'真实会话请求应被延迟拦截观察到'}).toBe(true);
    });
    await test.step('确认账户之前无法提交抽牌',async()=>{
