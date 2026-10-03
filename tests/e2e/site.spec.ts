@@ -1,4 +1,4 @@
-import { test,expect } from '@playwright/test';
+import { test,expect } from './fixtures';
 test('home, guest tarot and six-line ritual fit the viewport',async({page},info)=>{
  await page.goto('/');
  await expect(page.getByRole('heading',{name:/抬头看星.*回身看见自己/})).toBeVisible();

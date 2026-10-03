@@ -82,6 +82,8 @@ jobs:
       - run: npm run test:e2e
         env:
           CI_VISUAL_REVIEW: 'true'
+          CI_REVIEW_DETAIL: 'true'
+          CI_VISUAL_REVIEW_DETAIL: 'true'
       - name: Validate production Docker builds and isolated stack
         run: |
           sudo apt-get update -qq

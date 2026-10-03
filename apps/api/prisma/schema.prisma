@@ -101,6 +101,7 @@ model Reading {
   annotation String? @db.Text
   metadataVersion Int @default(0)
   conversations ReadingConversation[]
+  aiRequests AIRequest[]
   actions ActionPlan[]
   requestId String @db.VarChar(36)
   aiStatus String @default("idle") @db.VarChar(16)
@@ -147,6 +148,10 @@ model AIUsage {
 
 model AIRequest {
   id String @id @db.VarChar(36)
+  readingId String? @db.VarChar(36)
+  reading Reading? @relation(fields:[readingId],references:[id],onDelete:Cascade)
+  reportId String? @db.VarChar(36)
+  report ReviewReport? @relation(fields:[reportId],references:[id],onDelete:Cascade)
   userId String @db.VarChar(36)
   user User @relation(fields:[userId],references:[id],onDelete:Cascade)
   requestId String @db.VarChar(36)
@@ -159,6 +164,8 @@ model AIRequest {
   updatedAt DateTime @updatedAt
   @@unique([userId,requestId])
   @@index([userId,createdAt])
+  @@index([readingId])
+  @@index([reportId])
   @@map("ai_request")
 }
 model ReadingConversation {
@@ -295,6 +302,8 @@ model CreditLedger {
 }
 model ReviewReport {
   id String @id @db.VarChar(36)
+  inputCipher String? @db.LongText
+  aiRequests AIRequest[]
   userId String @db.VarChar(36)
   user User @relation(fields:[userId],references:[id],onDelete:Cascade)
   period String @db.VarChar(16)
