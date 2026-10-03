@@ -18,15 +18,19 @@ async function register(page:Page,email:string,name:string){
 }
 
 test('management publishing, feedback, redemption and membership use real isolated accounts',async({browser,baseURL},info)=>{
- test.skip(info.project.name!=='desktop-chromium','Management is tested once on the desktop project.');
+ test.skip(info.project.name==='small-chromium','Complete management flows run on desktop and iPhone.');
  test.setTimeout(120000);
  // Promotion is a disposable database fixture operation, never a production shortcut.
  if(process.env.NODE_ENV!=='test'||!process.env.DATABASE_URL||!['localhost','127.0.0.1','::1'].includes(new URL(process.env.DATABASE_URL).hostname))throw new Error('Management fixtures require the isolated local test database.');
  const origin=baseURL??'http://localhost:5173',token=randomUUID().replaceAll('-',''),emails=['member-'+token+'@example.com','operator-'+token+'@example.com'];
- const memberContext=await browser.newContext({baseURL:origin}),operatorContext=await browser.newContext({baseURL:origin}),guestContext=await browser.newContext({baseURL:origin});
+ const device={viewport:info.project.use.viewport,isMobile:info.project.use.isMobile,hasTouch:info.project.use.hasTouch,deviceScaleFactor:info.project.use.deviceScaleFactor,userAgent:info.project.use.userAgent};
+ const memberContext=await browser.newContext({baseURL:origin,...device}),operatorContext=await browser.newContext({baseURL:origin,...device}),guestContext=await browser.newContext({baseURL:origin,...device});
+ async function fitsViewport(page:Page){expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(await page.evaluate(()=>window.innerWidth));}
  const member=await memberContext.newPage(),operator=await operatorContext.newPage(),guest=await guestContext.newPage(),db=new PrismaClient(),codeIds:string[]=[],contentIds:string[]=[];
  try{
   await register(member,emails[0]!, '管理流程用户');
+  if(device.viewport)expect(await member.evaluate(()=>window.innerWidth)).toBe(device.viewport.width);
+  await fitsViewport(member);
   await member.goto('/feedback');
   const feedbackBody='希望支持更多占卜牌阵 '+token;
   await member.getByLabel('反馈类型').selectOption('idea');
@@ -36,6 +40,7 @@ test('management publishing, feedback, redemption and membership use real isolat
   const submittedResponse=await submitted;expect(submittedResponse.status()).toBe(201);
   const feedback=await submittedResponse.json() as {id:string};
   await expect(member.locator('.feedback-item').filter({hasText:feedbackBody})).toBeVisible();
+  await fitsViewport(member);
   expect((await memberContext.request.get('/api/v1/admin/overview')).status()).toBe(403);
   expect((await guestContext.request.get('/api/v1/feedback')).status()).toBe(401);
 
@@ -47,6 +52,8 @@ test('management publishing, feedback, redemption and membership use real isolat
   await expect(operator.getByRole('heading',{name:'每日使用趋势'})).toBeVisible();
   await operator.getByRole('button',{name:'最近 90 天',exact:true}).click();
   await expect(operator.getByText(/· 北京时间 · 仅汇总数量/)).toBeVisible();
+  await fitsViewport(operator);
+  await operator.screenshot({path:'test-results/admin-overview-'+info.project.name+'.png',fullPage:true,animations:'disabled'});
 
   await operator.getByRole('button',{name:'内容',exact:true}).click();
   const slug='management-'+token,title='纯文本公告 '+token,plainBody='<script>window.__oracleUnsafe=true</script>\n这段文字应当原样显示。';
@@ -71,6 +78,9 @@ test('management publishing, feedback, redemption and membership use real isolat
   expect(await letter.locator('script').count()).toBe(0);
   expect(await guest.evaluate(()=>Reflect.get(window,'__oracleUnsafe'))).toBeUndefined();
   expect((await guestContext.request.get('/api/v1/content/'+slug)).status()).toBe(200);
+  await fitsViewport(guest);
+  await fitsViewport(operator);
+  await operator.screenshot({path:'test-results/admin-content-'+info.project.name+'.png',fullPage:true,animations:'disabled'});
 
   await operator.getByRole('button',{name:'反馈',exact:true}).click();
   const item=operator.locator('.feedback-item').filter({hasText:feedbackBody});
@@ -84,6 +94,9 @@ test('management publishing, feedback, redemption and membership use real isolat
   const mine=member.locator('.feedback-item').filter({hasText:feedbackBody});
   await expect(mine.locator('.feedback-reply')).toContainText('建议已收到');
   await expect(mine.locator('.feedback-status')).toHaveText('已处理');
+  await fitsViewport(member);
+  await fitsViewport(operator);
+  await operator.screenshot({path:'test-results/admin-feedback-'+info.project.name+'.png',fullPage:true,animations:'disabled'});
 
   await operator.getByRole('button',{name:'兑换码',exact:true}).click();
   async function createCode(kind:'credits'|'membership',value:number){
@@ -133,6 +146,9 @@ test('management publishing, feedback, redemption and membership use real isolat
   for(const row of redemptionHistory.items){expect(row).not.toHaveProperty('code');expect(row).not.toHaveProperty('codeHash');}
   expect(JSON.stringify(redemptionHistory)).not.toContain(credits.code);
   expect(JSON.stringify(redemptionHistory)).not.toContain(plus.code);
+  await fitsViewport(member);
+  await fitsViewport(operator);
+  await member.screenshot({path:'test-results/membership-'+info.project.name+'.png',fullPage:true,animations:'disabled'});
   await expect(member.getByText('支付尚未开放',{exact:true})).toBeVisible();
   const payment=await(await memberContext.request.get('/api/v1/membership/payment-options')).json();
   expect(payment).toMatchObject({enabled:false,providers:[]});
@@ -162,7 +178,9 @@ test('management publishing, feedback, redemption and membership use real isolat
   expect(finalMembership).toMatchObject({tier:'free',credits:7,expiresAt:null});
   await member.reload();
   await expect(member.getByRole('heading',{name:'免费账户',exact:true})).toBeVisible();
-  await operator.screenshot({path:'test-results/management-desktop.png',fullPage:true,animations:'disabled'});
+  await fitsViewport(member);
+  await fitsViewport(operator);
+  await operator.screenshot({path:'test-results/management-'+info.project.name+'.png',fullPage:true,animations:'disabled'});
  }finally{
   await Promise.all([memberContext.close(),operatorContext.close(),guestContext.close()]);
   await db.user.deleteMany({where:{email:{in:emails}}});
