@@ -21,9 +21,10 @@ function ActionForm({item,seedTitle,readingId,onDirty,onSaved,onCancel}:{item?:A
 export function Actions(){
  const {user,pending}=useSession(),cache=useQueryClient(),[searchParams]=useSearchParams(),requestedId=searchParams.get('readingId')??'',validId=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestedId),readingId=validId?requestedId:undefined;
  const [status,setStatus]=useState<'all'|'open'|'done'>('open'),[editing,setEditing]=useState<Action|undefined>(),[seedTitle,setSeedTitle]=useState(''),[formKey,setFormKey]=useState(0),[draftDirty,setDraftDirty]=useState(false),[saved,setSaved]=useState(false);
+ useLayoutEffect(()=>{setEditing(undefined);setSeedTitle('');setDraftDirty(false);setSaved(false);setFormKey(key=>key+1);},[requestedId,user?.id]);
  const query=useInfiniteQuery({queryKey:['actions',user?.id,status],queryFn:({pageParam})=>api<{items:Action[];nextCursor:string|null}>('/actions?limit=20&status='+status+(pageParam?'&cursor='+encodeURIComponent(pageParam):'')),initialPageParam:null as string|null,getNextPageParam:page=>page.nextCursor,enabled:!!user});
  const source=useQuery({queryKey:['reading',user?.id,readingId],queryFn:()=>api<ReadingRecord>('/readings/'+readingId),enabled:!!user&&!!readingId});
- const blocker=useBlocker(({currentLocation,nextLocation})=>draftDirty&&currentLocation.pathname!==nextLocation.pathname);
+ const blocker=useBlocker(({currentLocation,nextLocation})=>draftDirty&&(currentLocation.pathname!==nextLocation.pathname||currentLocation.search!==nextLocation.search));
  useLayoutEffect(()=>{if(!draftDirty)return;const block=(e:BeforeUnloadEvent)=>e.preventDefault();window.addEventListener('beforeunload',block);return()=>window.removeEventListener('beforeunload',block);},[draftDirty]);
  const discard=()=>!draftDirty||window.confirm('行动还有未保存的内容，确认放弃当前草稿？');
  const reset=()=>{setEditing(undefined);setSeedTitle('');setDraftDirty(false);setFormKey(key=>key+1);};

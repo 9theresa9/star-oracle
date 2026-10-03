@@ -11,7 +11,7 @@ import './personal.css';
 export function JournalEditor({entry,onDirty}:{entry:DailyRecord;onDirty?:(dirty:boolean)=>void}){
  const cache=useQueryClient(),{user}=useSession(),[note,setNote]=useState(entry.journal.note),[mood,setMood]=useState<JournalData['mood']>(entry.journal.mood),[saved,setSaved]=useState(false),[baseline,setBaseline]=useState(entry.journal),[cloudError,setCloudError]=useState<unknown>(null),[loadingCloud,setLoadingCloud]=useState(false);
  const dirty=note!==baseline.note||mood!==baseline.mood;
- const blocker=useBlocker(({currentLocation,nextLocation})=>dirty&&currentLocation.pathname!==nextLocation.pathname);
+ const blocker=useBlocker(({currentLocation,nextLocation})=>dirty&&(currentLocation.pathname!==nextLocation.pathname||currentLocation.search!==nextLocation.search));
  useEffect(()=>{onDirty?.(dirty);return()=>onDirty?.(false);},[dirty,onDirty]);
  useEffect(()=>{if(!dirty&&entry.journal.version!==baseline.version){setBaseline(entry.journal);setNote(entry.journal.note);setMood(entry.journal.mood);}},[entry.id,entry.journal.version,dirty,baseline.version]);
  useEffect(()=>{if(dirty)setSaved(false);},[dirty]);
@@ -24,6 +24,7 @@ export function JournalEditor({entry,onDirty}:{entry:DailyRecord;onDirty?:(dirty
 export function Daily(){
  const {user,pending}=useSession(),[draftDirty,setDraftDirty]=useState(false),[displayed,setDisplayed]=useState<DailyRecord|null>(null);
  const query=useQuery({queryKey:['daily',user?.id],queryFn:()=>api<DailyRecord>('/daily/today',{method:'POST',body:'{}'}),enabled:!!user,staleTime:0,refetchOnWindowFocus:true});
+ useLayoutEffect(()=>{setDisplayed(null);setDraftDirty(false);},[user?.id]);
  // The server date changes at Shanghai midnight. Poll only while this page is visible.
  useEffect(()=>{if(!user)return;const id=setInterval(()=>{if(document.visibilityState==='visible')void query.refetch();},60000);return()=>clearInterval(id);},[user?.id]);
  useEffect(()=>{if(query.data&&(!draftDirty||displayed?.id===query.data.id))setDisplayed(query.data);},[query.data,draftDirty,displayed?.id]);
