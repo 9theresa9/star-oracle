@@ -1,9 +1,7 @@
 import { TAROT_DECK, KING_WEN_BY_MASK, KING_WEN_NAMES, REFLECTIONS, TRIGRAMS } from './data.js';
 
-export const SPREADS = Object.freeze({
-  single: { name: '单张聚焦', positions: ['此刻的焦点'] },
-  three: { name: '情境 · 提醒 · 行动', positions: ['当前情境', '需要留意', '可以尝试的行动'] }
-});
+import { SPREADS, SCENARIOS } from './catalog.js';
+export { SPREADS };
 const cardsById = new Map(TAROT_DECK.map(card => [card.id, card]));
 export { TAROT_DECK, KING_WEN_BY_MASK };
 
@@ -53,7 +51,56 @@ export function analyseLines(lines) {
     if (value === 6 || value === 9) movingMask |= 1 << index;
   });
   return { original: getHexagram(original), resulting: getHexagram(original ^ movingMask),
-    moving: lines.flatMap((v, i) => v === 6 || v === 9 ? [i + 1] : []), lines: [...lines] };
+    moving: lines.flatMap((v, i) => v === 6 || v === 9 ? [i + 1] : []), lines: [...lines],
+    mutual: getHexagram(((original >> 1) & 7) | (((original >> 2) & 7) << 3)),
+    opposite: getHexagram(original ^ 63),
+    reversed: getHexagram(Array.from({ length: 6 }, (_, i) => ((original >> i) & 1) << (5 - i)).reduce((a, b) => a | b, 0)) };
+}
+
+
+const EARLY_HEAVEN_MASKS = Object.freeze([7, 3, 5, 1, 6, 2, 4, 0]);
+function movingLines(upperNumber, lowerNumber, movingNumber) {
+  const upper = EARLY_HEAVEN_MASKS[(upperNumber - 1) % 8];
+  const lower = EARLY_HEAVEN_MASKS[(lowerNumber - 1) % 8];
+  const mask = (upper << 3) | lower;
+  const moving = (movingNumber - 1) % 6;
+  return Array.from({ length: 6 }, (_, i) => (mask >> i) & 1 ? (i === moving ? 9 : 7) : (i === moving ? 6 : 8));
+}
+
+/** Contemporary three-number convention; numbers identify upper/lower/moving respectively. */
+export function castNumberLines(numbers) {
+  if (!Array.isArray(numbers) || numbers.length !== 3 ||
+      numbers.some(n => !Number.isSafeInteger(n) || n < 1 || n > 1000000000)) {
+    throw new Error('请输入三个1到1000000000之间的正整数');
+  }
+  return { method: 'numbers', rule: 'modern-numbers-v1',
+    lines: movingLines(...numbers), inputs: { numbers: [...numbers] } };
+}
+
+/** Solar Gregorian adaptation. This deliberately does not claim traditional lunar calculation. */
+export function castTimeLines(timestamp, timeZone = 'Asia/Shanghai') {
+  const match = typeof timestamp === 'string' && timestamp.length <= 64 &&
+    timestamp.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})$/);
+  if (!match || typeof timeZone !== 'string' || timeZone.length > 64) throw new Error('起卦时间需要明确时区的ISO日期');
+  const [year, month, day, hour, minute, second] = match.slice(1, 7).map(v => v === undefined ? 0 : Number(v));
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  if (year < 1 || month < 1 || month > 12 || day < 1 || day > days[month - 1] || hour > 23 || minute > 59 || second > 59) {
+    throw new Error('起卦日期无效');
+  }
+  const date = new Date(timestamp);
+  if (!Number.isFinite(date.getTime())) throw new Error('起卦日期无效');
+  let parts;
+  try {
+    parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
+      timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23'
+    }).formatToParts(date).filter(p => p.type !== 'literal').map(p => [p.type, Number(p.value)]));
+  } catch { throw new Error('起卦时区无效'); }
+  const earthlyHour = Math.floor(((parts.hour + 1) % 24) / 2) + 1;
+  const dateSum = parts.year + parts.month + parts.day;
+  return { method: 'time', rule: 'modern-solar-time-v1',
+    lines: movingLines(dateSum, dateSum + earthlyHour, dateSum + earthlyHour),
+    inputs: { timestamp: date.toISOString(), timeZone } };
 }
 
 export function validateReading(value) {
@@ -64,6 +111,10 @@ export function validateReading(value) {
       !Number.isFinite(Date.parse(value.createdAt))) throw new Error('探索记录格式无效');
   const base = { version: 1, id: value.id, question: value.question.trim(),
     createdAt: new Date(value.createdAt).toISOString(), kind: value.kind };
+  if (value.scenario !== undefined) {
+    if (typeof value.scenario !== 'string' || !SCENARIOS.some(scenario => scenario.id === value.scenario)) throw new Error('探索主题无效');
+    base.scenario = value.scenario;
+  }
   if (value.kind === 'tarot') {
     if (!Object.hasOwn(SPREADS, value.spread) || !Array.isArray(value.cards) ||
         value.cards.length !== SPREADS[value.spread].positions.length) throw new Error('牌阵无效');
@@ -79,7 +130,18 @@ export function validateReading(value) {
   }
   if (value.kind === 'iching') {
     analyseLines(value.lines);
-    return { ...base, lines: [...value.lines] };
+    const result = { ...base, lines: [...value.lines] };
+    if (value.method !== undefined) {
+      if (!['coins', 'numbers', 'time'].includes(value.method)) throw new Error('起卦方式无效');
+      result.method = value.method;
+      if (value.method !== 'coins') {
+        if (!value.casting || typeof value.casting !== 'object' || Array.isArray(value.casting)) throw new Error('起卦参数无效');
+        const cast = value.method === 'numbers' ? castNumberLines(value.casting.numbers) : castTimeLines(value.casting.timestamp, value.casting.timeZone);
+        if (cast.lines.some((line, i) => line !== value.lines[i])) throw new Error('起卦参数与爻值不符');
+        result.casting = cast.inputs;
+      } else if (value.casting !== undefined) throw new Error('硬币法无需数字或时间参数');
+    } else if (value.casting !== undefined) throw new Error('起卦参数需要对应起卦方式');
+    return result;
   }
   throw new Error('探索方式无效');
 }
@@ -123,7 +185,14 @@ export function basicInterpretation(input) {
 }
 
 export function validateInterpretation(value, reading) {
-  const refs = new Set(evidenceFor(reading).map(item => item.reference));
+  return validateInterpretationForEvidence(value, evidenceFor(reading));
+}
+
+export function validateInterpretationForEvidence(value, evidence) {
+  if (!Array.isArray(evidence) || evidence.length < 1 || evidence.length > 128 ||
+      evidence.some(item => !item || typeof item.reference !== 'string' || item.reference.length < 1 || item.reference.length > 100)) throw new Error('解读依据无效');
+  const refs = new Set(evidence.map(item => item.reference));
+  if (refs.size !== evidence.length) throw new Error('解读依据不能重复');
   const textOK = (text, max) => typeof text === 'string' && text.trim().length > 0 && text.length <= max;
   if (!value || !textOK(value.summary, 1600) || !textOK(value.reflection, 500) ||
       !Array.isArray(value.insights) || value.insights.length !== refs.size ||
