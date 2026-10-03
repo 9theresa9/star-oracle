@@ -3,3 +3,6 @@
 @media(max-width:360px){.management-tabs button{flex-basis:76px;font-size:11px}.statistics-range{align-items:flex-start;flex-direction:column}.statistics-range .segmented{width:100%}.feedback-item{padding:18px}.feedback-counts{gap:12px}.install-card{padding:24px 18px}}
 
 .chart-color-0{background:#b39bdd}.chart-color-1{background:#d5b779}.chart-color-2{background:#9fbea0}.chart-color-3{background:#91bac9}
+
+/* User supplied text must remain inside narrow layouts. */
+.management-page>h1,.content-letter h2,.management-list-item h3,.feedback-editor h3,.membership-summary h2,.one-time-code h3,.account-page .form-panel>h2,.account-page .form-panel>p{overflow-wrap:anywhere}
