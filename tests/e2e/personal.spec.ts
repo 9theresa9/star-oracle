@@ -1,4 +1,6 @@
 import { test,expect,type Page,type Response,type TestInfo } from './fixtures';
+import { PrismaClient } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
 
 function write(page:Page,path:string,method:'POST'|'PATCH'|'DELETE'){
  return page.waitForResponse(response=>new URL(response.url()).pathname===path&&response.request().method()===method);
@@ -28,6 +30,8 @@ function privateKeys(value:unknown):string[]{
 
 test('saved explorations, private calendar, actions, reviews and export survive real user navigation',async({page,context},info)=>{
  test.setTimeout(90000);
+ const fixtureURL=new URL(process.env.DATABASE_URL??'mysql://invalid');
+ if(process.env.NODE_ENV!=='test'||!['localhost','127.0.0.1','[::1]'].includes(fixtureURL.hostname)||fixtureURL.pathname!=='/star_oracle')throw new Error('Private review fixtures require the isolated loopback test database.');
  const email='personal-'+info.project.name+'-'+Date.now()+'@example.com';
  const password='journey-test-password-123';
  const question='我如何把这次领悟转化成一个可以尝试的小行动？';
@@ -172,6 +176,37 @@ test('saved explorations, private calendar, actions, reviews and export survive 
  await page.getByRole('button',{name:'每月回顾',exact:true}).click();
  await expect(page.getByRole('button',{name:'生成仅属于你的月回顾',exact:true})).toBeDisabled();
  await expect(page.getByRole('heading',{name:'留给自己的几个问题',exact:true})).toBeVisible();
+
+ // A failed, content-free report exercises deletion without enabling a fake AI service.
+ // Only this disposable test user's row is seeded; the deletion itself uses the real UI and API.
+ const failedReportId=randomUUID(),fixtureDb=new PrismaClient();
+ try{
+  const owner=await fixtureDb.user.findUniqueOrThrow({where:{email},select:{id:true}});
+  await fixtureDb.reviewReport.create({data:{id:failedReportId,userId:owner.id,period:'month',startDate:daily.date,endDate:daily.date,includeJournal:false,requestId:randomUUID(),status:'failed',inputCipher:null,resultCipher:null}});
+  const loadedReports=page.waitForResponse(response=>new URL(response.url()).pathname==='/api/v1/insights/reports'&&response.request().method()==='GET');
+  await page.getByRole('button',{name:'刷新',exact:true}).click();
+  expect((await loadedReports).status()).toBe(200);
+  const failedReport=page.locator('.insight-report').filter({has:page.getByText('这次生成未完成。报告没有可用的 AI 内容，请稍后重新发起。',{exact:true})});
+  await expect(failedReport).toHaveCount(1);
+  await expect(failedReport.getByRole('button',{name:'删除这份回顾',exact:true})).toBeVisible();
+  const deletingReport=write(page,'/api/v1/insights/reports/'+failedReportId,'DELETE');
+  const openingDialog=page.waitForEvent('dialog');
+  const clickingDelete=failedReport.getByRole('button',{name:'删除这份回顾',exact:true}).click();
+  const dialog=await openingDialog;
+  try{
+   expect(dialog.type()).toBe('confirm');
+   expect(dialog.message()).toContain('AI 输入快照');
+   expect(dialog.message()).toContain('不会返还');
+  }finally{await dialog.accept();}
+  await clickingDelete;
+  await succeeded(await deletingReport);
+  await expect(failedReport).toHaveCount(0);
+  await expect(page.getByRole('status').filter({hasText:'回顾与其 AI 输入快照已删除'})).toBeVisible();
+  expect(await fixtureDb.reviewReport.count({where:{id:failedReportId,userId:owner.id}}),'删除应持久化到本人报告数据库').toBe(0);
+ }finally{
+  await fixtureDb.reviewReport.deleteMany({where:{id:failedReportId}});
+  await fixtureDb.$disconnect();
+ }
  await fits(page);
  await capture(page,info,'insights');
 
@@ -195,6 +230,7 @@ test('saved explorations, private calendar, actions, reviews and export survive 
  for await(const chunk of stream)chunks.push(Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk));
  const exported=JSON.parse(Buffer.concat(chunks).toString('utf8'));
  expect(exported.version).toBe(2);
+ expect(exported.reports.some((item:{id:string})=>item.id===failedReportId),'本人导出也不应包含已删除的回顾').toBe(false);
  expect(exported.readings).toEqual(expect.arrayContaining([expect.objectContaining({id:reading.id,note,favorite:true,tags:['成长','行动'],reading:expect.objectContaining({spread:'three',question})})]));
  expect(exported.daily).toEqual(expect.arrayContaining([expect.objectContaining({id:daily.id,journal:expect.objectContaining({note:journal,mood:'calm'})})]));
  expect(exported.actions).toEqual(expect.arrayContaining([expect.objectContaining({id:retained.id,title:retainedTitle,readingId:reading.id})]));
