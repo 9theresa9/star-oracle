@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ConflictException, BadRequestException, PayloadTooLargeException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, BadRequestException, PayloadTooLargeException, ServiceUnavailableException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { evidenceFor,DAILY_MOODS,type Interpretation,type Evidence } from '@star-oracle/domain';
@@ -105,38 +105,59 @@ export class PersonalService {
   const rows=await db.reviewReport.findMany({where:{userId},take:page.limit+1,orderBy:[{createdAt:'desc'},{id:'desc'}],...(page.cursor?{cursor:{id:page.cursor},skip:1}:{})});
   return {items:rows.slice(0,page.limit).map(decodeReport),nextCursor:rows.length>page.limit?rows[page.limit-1]!.id:null};
  }
+ async removeReport(userId:string,id:string,requestId:string){
+  if(!await db.reviewReport.findFirst({where:{id,userId}}))throw new NotFoundException('回顾不存在');
+  await db.$transaction(async tx=>{
+   await tx.reviewReport.deleteMany({where:{id,userId}});
+   await tx.auditLog.create({data:{id:randomUUID(),actorId:userId,action:'review.delete',targetId:id,requestId}});
+  });return {ok:true};
+ }
  async report(userId:string,input:ReportInput,requestId:string){
   const range=periodRange(input.period,input.date);
   let existing=await db.reviewReport.findUnique({where:{userId_requestId:{userId,requestId:input.requestId}}});
   if(existing&&(existing.period!==input.period||existing.startDate!==range.startDate||existing.includeJournal!==input.includeJournal))throw new ConflictException('请求标识已用于其他回顾');
   if(existing?.status==='done')return decodeReport(existing);
-  if(existing?.status==='pending'&&existing.updatedAt>new Date(Date.now()-120000))throw new ConflictException('回顾正在生成，请稍后刷新');
+  const completed=existing?await db.aIRequest.findUnique({where:{userId_requestId:{userId,requestId:existing.requestId}}}):null;
+  if(completed&&completed.reportId!==existing!.id)throw new ConflictException('请求标识已用于其他内容');
+  if(existing?.status==='pending'&&existing.updatedAt>new Date(Date.now()-120000)&&completed?.status!=='done')throw new ConflictException('回顾正在生成，请稍后刷新');
+  if(existing&&!existing.inputCipher&&completed)throw new ServiceUnavailableException('这份回顾缺少恢复快照，请开始新的回顾');
   const id=existing?.id??randomUUID();
   try{
    if(existing){
     const claim=await db.reviewReport.updateMany({where:{id,userId,updatedAt:existing.updatedAt},data:{status:'pending'}});
     if(claim.count!==1)throw new ConflictException('回顾正在生成，请稍后刷新');
-   }
-   else existing=await db.reviewReport.create({data:{id,userId,period:input.period,startDate:range.startDate,endDate:range.endDate,includeJournal:input.includeJournal,requestId:input.requestId,status:'pending'}});
+    existing=await db.reviewReport.findUniqueOrThrow({where:{id}});
+   } else existing=await db.reviewReport.create({data:{id,userId,period:input.period,startDate:range.startDate,endDate:range.endDate,includeJournal:input.includeJournal,requestId:input.requestId,status:'pending'}});
   }catch(error){if(error instanceof Prisma.PrismaClientKnownRequestError&&error.code==='P2002')throw new ConflictException('回顾正在生成，请稍后刷新');throw error;}
   try {
-   const summary=await this.insights(userId,input.period,input.date);
-   const [records,journal]=await Promise.all([db.reading.findMany({where:{userId,createdAt:{gte:range.from,lt:range.to}},orderBy:{createdAt:'desc'},take:6}),db.dailyEntry.findMany({where:{userId,date:{gte:range.startDate,lt:range.endExclusive}},orderBy:{date:'asc'},take:31})]);
-   const readings=records.map(row=>decodeReading(row).reading);
-   const evidence:Evidence[]=[{reference:'period',name:range.startDate+' 至 '+range.endDate,position:'本人的实际记录统计',keywords:['探索 '+summary.summary.readings+' 次','星笺 '+summary.summary.dailyEntries+' 天','完成行动 '+summary.summary.completedActions+' 项']}];
-   for(const reading of readings)for(const e of evidenceFor(reading).slice(0,2))evidence.push({...e,reference:reading.id+':'+e.reference});
-   const context=JSON.stringify({period:input.period,startDate:range.startDate,endDate:range.endDate,statistics:summary.summary,selection:'最多最近6次探索；未覆盖的记录不推断',readings:readings.map(r=>({id:r.id,question:r.question})),daily:(input.includeJournal?journal.slice(-10):journal).map(row=>({date:row.date,mood:row.mood,...(input.includeJournal?{note:open(row.note,'journal:'+userId+':'+row.id).slice(0,500)}:{})})),journalIncluded:input.includeJournal,journalSelection:input.includeJournal?'最多最近10天，每条最多500字；不推断未包含的日记':'日记正文未发送'});
-   const result=await requestModel({userId,requestId:input.requestId,question:'请基于我的真实记录做一份'+(input.period==='week'?'每周':'每月')+'反思回顾，分清记录事实与建议，不预测未来或诊断心理状况。',evidence,context});
+   let snapshot:{question:string;evidence:Evidence[];context:string};
+   if(existing.inputCipher)snapshot=JSON.parse(open(existing.inputCipher,'review-input:'+userId+':'+id));
+   else {
+    const summary=await this.insights(userId,input.period,input.date);
+    const [records,journal]=await Promise.all([db.reading.findMany({where:{userId,createdAt:{gte:range.from,lt:range.to}},orderBy:{createdAt:'desc'},take:6}),db.dailyEntry.findMany({where:{userId,date:{gte:range.startDate,lt:range.endExclusive}},orderBy:{date:'asc'},take:31})]);
+    const readings=records.map(row=>decodeReading(row).reading);
+    const evidence:Evidence[]=[{reference:'period',name:range.startDate+' 至 '+range.endDate,position:'本人的实际记录统计',keywords:['探索 '+summary.summary.readings+' 次','星笺 '+summary.summary.dailyEntries+' 天','完成行动 '+summary.summary.completedActions+' 项']}];
+    for(const reading of readings)for(const e of evidenceFor(reading).slice(0,2))evidence.push({...e,reference:reading.id+':'+e.reference});
+    const context=JSON.stringify({period:input.period,startDate:range.startDate,endDate:range.endDate,statistics:summary.summary,selection:'最多最近6次探索；未覆盖的记录不推断',readings:readings.map(r=>({id:r.id,question:r.question})),daily:(input.includeJournal?journal.slice(-10):journal).map(row=>({date:row.date,mood:row.mood,...(input.includeJournal?{note:open(row.note,'journal:'+userId+':'+row.id).slice(0,500)}:{})})),journalIncluded:input.includeJournal,journalSelection:input.includeJournal?'最多最近10天，每条最多500字；不推断未包含的日记':'日记正文未发送'});
+    snapshot={question:'请基于我的真实记录做一份'+(input.period==='week'?'每周':'每月')+'反思回顾，分清记录事实与建议，不预测未来或诊断心理状况。',evidence,context};
+    const savedInput=await db.reviewReport.updateMany({where:{id,userId,status:'pending',inputCipher:null},data:{inputCipher:seal(JSON.stringify(snapshot),'review-input:'+userId+':'+id)}});
+    if(savedInput.count!==1)throw new ConflictException('回顾状态已改变，请刷新');
+   }
+   // Only the authenticated report owner's identifiers are used. The encrypted
+   // snapshot supplies content, never request IDs or another report's scope.
+   const result=await requestModel({userId,requestId:existing.requestId,reportId:id,question:snapshot.question,evidence:snapshot.evidence,context:snapshot.context});
    const saved=await db.$transaction(async tx=>{
-    const value=await tx.reviewReport.update({where:{id},data:{resultCipher:seal(JSON.stringify(result),'review:'+userId+':'+id),status:'done'}});
-    await tx.auditLog.create({data:{id:randomUUID(),actorId:userId,action:'review.generate',targetId:id,requestId}});return value;
+    const changed=await tx.reviewReport.updateMany({where:{id,userId,status:'pending'},data:{resultCipher:seal(JSON.stringify(result),'review:'+userId+':'+id),status:'done'}});
+    if(changed.count!==1)throw new ConflictException('回顾已删除或状态已改变，请刷新');
+    await tx.auditLog.create({data:{id:randomUUID(),actorId:userId,action:'review.generate',targetId:id,requestId}});
+    return tx.reviewReport.findUniqueOrThrow({where:{id}});
    });return decodeReport(saved);
   }catch(error){await db.reviewReport.updateMany({where:{id,userId,status:'pending'},data:{status:'failed'}}).catch(()=>{});throw error;}
  }
  async export(userId:string){
   if(!await consumeLimit('export:'+userId,2,300))throw new RateLimitException('导出较多，请稍后再试');
   const where={userId};
-  const counts=await Promise.all([db.reading.count({where}),db.dailyEntry.count({where}),db.actionPlan.count({where}),db.reviewReport.count({where}),db.readingConversation.count({where}),db.feedback.count({where}),db.creditLedger.count({where})]);
+  const counts=await Promise.all([db.reading.count({where}),db.dailyEntry.count({where}),db.actionPlan.count({where}),db.reviewReport.count({where}),db.readingConversation.count({where}),db.feedback.count({where}),db.creditLedger.count({where}),db.redemption.count({where})]);
   if(counts.reduce((a,b)=>a+b,0)>20000)throw new PayloadTooLargeException('记录较多，请联系管理员安排分批导出');
   // Reject oversized exports before loading/decrypting all rows into server memory.
   const sizes=await db.$queryRaw<{size:bigint|null}[]>(Prisma.sql`SELECT SUM(bytes) AS size FROM (
@@ -148,11 +169,11 @@ export class PersonalService {
    UNION ALL SELECT COALESCE(SUM(OCTET_LENGTH(bodyCipher)+COALESCE(OCTET_LENGTH(adminReplyCipher),0)),0) FROM feedback WHERE userId = ${userId}
   ) AS owned_sizes`);
   if(Number(sizes[0]?.size??0)>12000000)throw new PayloadTooLargeException('导出文件较大，请联系管理员安排分批导出');
-  const [readings,daily,actions,reports,conversations,feedback,ledger,membership]=await Promise.all([
-   db.reading.findMany({where,orderBy:{createdAt:'asc'}}),db.dailyEntry.findMany({where,orderBy:{date:'asc'}}),db.actionPlan.findMany({where,orderBy:{createdAt:'asc'}}),db.reviewReport.findMany({where,orderBy:{createdAt:'asc'}}),db.readingConversation.findMany({where,orderBy:{createdAt:'asc'}}),db.feedback.findMany({where,orderBy:{createdAt:'asc'}}),db.creditLedger.findMany({where,orderBy:{createdAt:'asc'},select:{id:true,kind:true,amount:true,balance:true,createdAt:true}}),new MembershipService().get(userId)
+  const [readings,daily,actions,reports,conversations,feedback,ledger,membership,redemptions]=await Promise.all([
+   db.reading.findMany({where,orderBy:{createdAt:'asc'}}),db.dailyEntry.findMany({where,orderBy:{date:'asc'}}),db.actionPlan.findMany({where,orderBy:{createdAt:'asc'}}),db.reviewReport.findMany({where,orderBy:{createdAt:'asc'}}),db.readingConversation.findMany({where,orderBy:{createdAt:'asc'}}),db.feedback.findMany({where,orderBy:{createdAt:'asc'}}),db.creditLedger.findMany({where,orderBy:{createdAt:'asc'},select:{id:true,kind:true,amount:true,balance:true,createdAt:true}}),new MembershipService().get(userId),db.redemption.findMany({where,orderBy:{createdAt:'asc'},select:{id:true,createdAt:true,codeId:true,code:{select:{codeHint:true,kind:true,amount:true,durationDays:true}}}})
   ]);
   const oracle=new OracleService();
-  const result={version:2,exportedAt:new Date().toISOString(),readings:readings.map(row=>decodeReading(row)),daily:daily.map(row=>oracle.decodeDaily(row)),actions:actions.map(decodeAction),reports:reports.map(decodeReport),conversations:conversations.map(row=>({id:row.id,readingId:row.readingId,prompt:open(row.promptCipher,'conversation-prompt:'+userId+':'+row.id),answer:row.answerCipher?JSON.parse(open(row.answerCipher,'conversation-answer:'+userId+':'+row.id)):null,status:row.status,createdAt:row.createdAt.toISOString()})),feedback:feedback.map(decodeFeedback),membership,creditLedger:ledger};
+  const result={version:2,exportedAt:new Date().toISOString(),readings:readings.map(row=>decodeReading(row)),daily:daily.map(row=>oracle.decodeDaily(row)),actions:actions.map(decodeAction),reports:reports.map(decodeReport),conversations:conversations.map(row=>({id:row.id,readingId:row.readingId,prompt:open(row.promptCipher,'conversation-prompt:'+userId+':'+row.id),answer:row.answerCipher?JSON.parse(open(row.answerCipher,'conversation-answer:'+userId+':'+row.id)):null,status:row.status,createdAt:row.createdAt.toISOString()})),feedback:feedback.map(decodeFeedback),membership,creditLedger:ledger,redemptions:redemptions.map(({code,...row})=>({...row,...code,createdAt:row.createdAt.toISOString()}))};
   if(Buffer.byteLength(JSON.stringify(result),'utf8')>20000000)throw new PayloadTooLargeException('导出文件较大，请联系管理员安排分批导出');
   return result;
  }
