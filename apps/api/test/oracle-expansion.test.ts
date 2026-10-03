@@ -196,5 +196,13 @@ test('follow-up AI remains on the owned cast, is idempotent, encrypted and budge
  await request('/api/v1/readings/'+record.id,{cookie:owner.cookie,method:'DELETE',body:{}});
  assert.equal(await db.aIRequest.count({where:{userId:owner.id,readingId:record.id}}),0,'deleting a reading removes its private initial and follow-up model cache');
  assert.equal(await db.aIAllowance.count({where:{userId:owner.id}}),allowancesBeforeDelete,'deletion retains non-content accounting entries');
+ const replacement=await draw(owner.cookie,{question:'删除原记录后新建的另一项问题'});
+ await redis.del('limit:ai:user:'+owner.id);
+ const replayCalls=providerCalls,replayBudget=(await db.aIUsage.findUniqueOrThrow({where:{date:chinaDate()}})).requests;
+ const replay=await request('/api/v1/readings/'+replacement.id+'/interpret',{cookie:owner.cookie,method:'POST',body:{consent:true,requestId:initialRequestId}});
+ assert.equal(replay.status,409,'deleting a source must not make its consumed nonce available for another free AI call');
+ assert.equal(providerCalls,replayCalls);assert.equal((await db.aIUsage.findUniqueOrThrow({where:{date:chinaDate()}})).requests,replayBudget);
+ assert.equal(await db.aIAllowance.count({where:{userId:owner.id}}),allowancesBeforeDelete);
+ assert.equal(await db.aIRequest.count({where:{userId:owner.id,readingId:replacement.id}}),0);
  assert.equal(await db.readingConversation.count({where:{readingId:record.id}}),0,'deleting an owned cast cascades its private conversation');
 });
