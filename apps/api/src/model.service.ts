@@ -64,6 +64,10 @@ export async function requestModel(input:ModelRequest):Promise<Interpretation> {
      if(input.reportId&&!await tx.reviewReport.findFirst({where:{id:input.reportId,userId:input.userId},select:{id:true}}))throw new NotFoundException('回顾不存在');
      const existing=await tx.aIRequest.findUnique({where});
      if(existing)throw new ConflictException('这次解读已开始，请稍后刷新');
+     // Content caches cascade when their source is deleted. The durable,
+     // content-free allowance remains the nonce tombstone: an old nonce must
+     // never become a new provider call with a free personal allowance.
+     if(await tx.aIAllowance.findUnique({where}))throw new ConflictException('请求标识已用于已移除的内容，请开始新的尝试');
      await tx.aIRequest.create({data:{id:requestRowId,userId:input.userId,requestId:input.requestId,fingerprint,readingId:input.readingId??null,reportId:input.reportId??null,status:'pending',pendingSince:started,reservedDay:day}});
      const reserved=await tx.aIUsage.updateMany({where:{date:day,requests:{lt:config.AI_DAILY_LIMIT}},data:{requests:{increment:1}}});
      if(reserved.count!==1)throw new RateLimitException('今天的 AI 额度已用完');
