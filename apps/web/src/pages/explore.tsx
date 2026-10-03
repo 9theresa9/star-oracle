@@ -22,7 +22,7 @@ function currentShanghaiTime(){
 function Conversation({record,aiEnabled,provider}:{record:ReadingRecord;aiEnabled:boolean;provider:string}){
  const {user}=useSession(),cache=useQueryClient(),[prompt,setPrompt]=useState(''),[consent,setConsent]=useState(false),[attempt,setAttempt]=useState(()=>crypto.randomUUID());
  const key=['conversation',user?.id,record.id];
- const query=useInfiniteQuery({queryKey:key,initialPageParam:'',queryFn:({pageParam})=>api<{items:ConversationEntry[];nextCursor:string|null}>('/readings/'+record.id+'/conversation?limit=20'+(pageParam?'&cursor='+encodeURIComponent(pageParam):'')),getNextPageParam:last=>last.nextCursor??undefined,enabled:!!user,retry:false});
+ const query=useInfiniteQuery({queryKey:key,initialPageParam:'',queryFn:({pageParam})=>api<{items:ConversationEntry[];nextCursor:string|null}>('/readings/'+record.id+'/conversation?limit=20'+(pageParam?'&cursor='+encodeURIComponent(pageParam):'')),getNextPageParam:last=>last.nextCursor??undefined,refetchInterval:query=>query.state.data?.pages.some(page=>page.items.some(item=>item.status==='pending'))?2000:false,enabled:!!user,retry:false});
  const send=useMutation({mutationFn:(requestId:string)=>api<ConversationEntry>('/readings/'+record.id+'/conversation',{method:'POST',body:json({prompt,consent:true,requestId})}),onSuccess:()=>{setPrompt('');setAttempt(crypto.randomUUID());cache.invalidateQueries({queryKey:key});}});
  function submit(e:FormEvent){e.preventDefault();const id=send.isError?crypto.randomUUID():attempt;setAttempt(id);send.mutate(id);}
  return <details className="oracle-details conversation-panel"><summary><MessageCircle size={17}/>围绕这次结果，继续聊聊</summary><p className="muted small">继续理解同一组牌或卦象，不会重新抽牌。AI 会收到本次问题、结果、本次追问和有限的最近对话；日记不会发送。模型服务：{provider}。</p>
