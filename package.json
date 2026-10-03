@@ -13,7 +13,7 @@
   "scripts": {
     "build": "npm run build -w @star-oracle/api && npm run build -w @star-oracle/web",
     "typecheck": "npm run typecheck -w @star-oracle/api && npm run typecheck -w @star-oracle/web",
-    "test": "node --test tests/engine.test.js tests/daily.test.js && npm run test -w @star-oracle/api",
+    "test": "node --test tests/*.test.js && npm run test -w @star-oracle/api",
     "dev:api": "node --env-file=.env --import tsx --watch apps/api/src/main.ts",
     "dev:web": "npm run dev -w @star-oracle/web",
     "db:migrate": "node --env-file=.env node_modules/prisma/build/index.js migrate deploy --schema apps/api/prisma/schema.prisma",

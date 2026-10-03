@@ -4,6 +4,8 @@ import { OracleController } from './oracle.controller.js';
 import { AdminController } from './admin.controller.js';
 import { OracleService } from './oracle.service.js';
 import { AdminService } from './admin.service.js';
+import { PersonalController } from './personal.controller.js';
+import { PersonalService } from './personal.service.js';
 import { SessionGuard,AdminGuard } from './security.js';
 @Global()
 @Module({providers:[SessionGuard,AdminGuard],exports:[SessionGuard,AdminGuard]})
@@ -12,5 +14,7 @@ class SecurityModule {}
 class OracleModule {}
 @Module({controllers:[AdminController],providers:[AdminService]})
 class AdministrationModule {}
-@Module({imports:[SecurityModule,OracleModule,AdministrationModule],controllers:[PublicController]})
+@Module({controllers:[PersonalController],providers:[PersonalService]})
+class PersonalModule {}
+@Module({imports:[SecurityModule,OracleModule,AdministrationModule,PersonalModule],controllers:[PublicController]})
 export class AppModule {}
