@@ -7,10 +7,11 @@ import '../pages/divination.css';
 
 /** Original, deterministic line art. No third-party card images or fonts. */
 export function CardArt({id,reversed=false,back=false}:{id:string;reversed?:boolean;back?:boolean}){
- const seed=Array.from(id).reduce((n,c)=>n+c.charCodeAt(0),0),petals=back?8:5+seed%5;
+ const seed=Array.from(id).reduce((n,c)=>n+c.charCodeAt(0),0),petals=back?8:5+seed%5,card=TAROT_DECK.find(c=>c.id===id),english=card?.en.toLowerCase()??'';
+ const suit=english.includes('wands')?'wands':english.includes('cups')?'cups':english.includes('swords')?'swords':english.includes('pentacles')?'pentacles':'major';
  return <svg className={'oracle-card-art '+(reversed?'art-reversed':'')} viewBox="0 0 160 220" aria-hidden="true" focusable="false">
   <g fill="none" stroke="currentColor" strokeWidth="1"><rect x="8" y="8" width="144" height="204" rx="8" opacity=".35"/><path d="M22 32h16M30 24v16M122 188h16M130 180v16" opacity=".6"/><ellipse cx="80" cy="108" rx="48" ry="69" opacity=".3"/><circle cx="80" cy="108" r="39" opacity=".65"/>{Array.from({length:petals},(_,i)=><path key={i} d="M80 64Q112 92 80 108Q48 92 80 64" transform={'rotate('+(i*360/petals)+' 80 108)'} opacity={back?'.42':'.7'}/>)}
-   {back?<><circle cx="80" cy="108" r="20"/><path d="M80 88l5 15 15 5-15 5-5 15-5-15-15-5 15-5Z"/></>:<><path d={'M80 77L'+(102+seed%6)+' 119H'+(58-seed%6)+'Z'} fill="currentColor" fillOpacity=".08"/><circle cx="80" cy="106" r="8" fill="currentColor" fillOpacity=".22"/><path d="M54 156h52M64 164h32" opacity=".5"/></>}
+   {back?<><circle cx="80" cy="108" r="20"/><path d="M80 88l5 15 15 5-15 5-5 15-5-15-15-5 15-5Z"/></>:<><path d={'M80 77L'+(102+seed%6)+' 119H'+(58-seed%6)+'Z'} fill="currentColor" fillOpacity=".08"/><circle cx="80" cy="106" r="8" fill="currentColor" fillOpacity=".22"/>{suit==='wands'?<path d="M77 137l6-58M83 89q17-9 18-21M79 108q-17-8-19-20" strokeWidth="2"/>:suit==='cups'?<path d="M61 91h38v17q0 22-19 22t-19-22ZM80 130v15M65 145h30M99 95h8v11q0 12-8 12" strokeWidth="2"/>:suit==='swords'?<path d="M80 73l-7 14v40h14V87ZM62 127h36M80 127v24M73 151h14" strokeWidth="2"/>:suit==='pentacles'?<path d="M80 78l9 23h25l-20 15 8 24-22-15-22 15 8-24-20-15h25Z" strokeWidth="1.6"/>:null}<path d="M54 164h52M64 172h32" opacity=".5"/></>}
    <circle cx="80" cy="34" r="3"/><circle cx="80" cy="185" r="2"/>
   </g>
  </svg>;
