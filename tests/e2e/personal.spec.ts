@@ -30,16 +30,38 @@ async function fits(page:Page){
 async function capture(page:Page,info:TestInfo,name:'history'|'insights'|'space'){
  // Check the actual viewport before blur so the overview capture cannot hide input zoom.
  await fits(page);
- await page.evaluate(()=>{if(document.activeElement instanceof HTMLElement)document.activeElement.blur();window.scrollTo({top:0,left:0,behavior:'instant'});});
- await expect.poll(()=>page.evaluate(()=>window.scrollY),'完整页面截图应从页面顶部开始').toBe(0);
- await fits(page);
- await expect(page.locator('main .reveal')).toHaveCSS('opacity','1');
- if(process.env.CI_REVIEW_DETAIL==='true')console.log('PERSONAL_VIEWPORT_'+name+'_'+info.project.name+' '+JSON.stringify(await page.evaluate(()=>({innerWidth:window.innerWidth,innerHeight:window.innerHeight,scrollX:window.scrollX,scrollY:window.scrollY,visual:window.visualViewport?{width:window.visualViewport.width,height:window.visualViewport.height,scale:window.visualViewport.scale,offsetLeft:window.visualViewport.offsetLeft,offsetTop:window.visualViewport.offsetTop,pageLeft:window.visualViewport.pageLeft,pageTop:window.visualViewport.pageTop}:null}))));
- const file=info.outputPath('personal-'+name+'.png');
- await page.screenshot({animations:'disabled',fullPage:true,path:file});
- await info.attach(name,{path:file,contentType:'image/png'});
- if(process.env.CI_REVIEW_DETAIL==='true'&&name!=='insights'&&info.project.name!=='small-chromium'){
-  console.log('DETAIL_PREVIEW_'+name+'_'+info.project.name+' '+(await page.screenshot({type:'jpeg',quality:60,animations:'disabled'})).toString('base64'));
+ // Native scroll anchoring can move the overview by a few pixels as fields lose focus.
+ // Disable it only for framing these screenshots, then restore the page's normal behavior.
+ const previousAnchors=await page.evaluate(()=>{
+  const roots=[document.documentElement,document.body];
+  const previous=roots.map(root=>({value:root.style.getPropertyValue('overflow-anchor'),priority:root.style.getPropertyPriority('overflow-anchor')}));
+  for(const root of roots)root.style.setProperty('overflow-anchor','none','important');
+  if(document.activeElement instanceof HTMLElement)document.activeElement.blur();
+  return previous;
+ });
+ try{
+  await expect(page.locator('main .reveal')).toHaveCSS('opacity','1');
+  await expect.poll(()=>page.evaluate(async()=>{
+   window.scrollTo({top:0,left:0,behavior:'instant'});
+   await new Promise<void>(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve())));
+   return window.scrollY;
+  }),'完整页面截图应从页面顶部开始').toBe(0);
+  await fits(page);
+  if(process.env.CI_REVIEW_DETAIL==='true')console.log('PERSONAL_VIEWPORT_'+name+'_'+info.project.name+' '+JSON.stringify(await page.evaluate(()=>({innerWidth:window.innerWidth,innerHeight:window.innerHeight,scrollX:window.scrollX,scrollY:window.scrollY,visual:window.visualViewport?{width:window.visualViewport.width,height:window.visualViewport.height,scale:window.visualViewport.scale,offsetLeft:window.visualViewport.offsetLeft,offsetTop:window.visualViewport.offsetTop,pageLeft:window.visualViewport.pageLeft,pageTop:window.visualViewport.pageTop}:null}))));
+  const file=info.outputPath('personal-'+name+'.png');
+  await page.screenshot({animations:'disabled',fullPage:true,path:file});
+  await info.attach(name,{path:file,contentType:'image/png'});
+  if(process.env.CI_REVIEW_DETAIL==='true'&&name!=='insights'&&info.project.name!=='small-chromium'){
+   console.log('DETAIL_PREVIEW_'+name+'_'+info.project.name+' '+(await page.screenshot({type:'jpeg',quality:60,animations:'disabled'})).toString('base64'));
+  }
+ }finally{
+  if(!page.isClosed())await page.evaluate(previous=>{
+   [document.documentElement,document.body].forEach((root,index)=>{
+    const saved=previous[index]!;
+    if(saved.value)root.style.setProperty('overflow-anchor',saved.value,saved.priority);
+    else root.style.removeProperty('overflow-anchor');
+   });
+  },previousAnchors);
  }
 }
 function privateKeys(value:unknown):string[]{
