@@ -1,11 +1,13 @@
-# Review 路线
+# 全面功能版 review 路线
 
-1. `docs/ARCHITECTURE.md`：为什么采用当前方案，三项成熟方案的比较。
-2. `packages/contracts` 与 `docs/openapi.json`：前后端契约和输入限制。
-3. `apps/api/src/security.ts`、`auth.ts`、`infrastructure.ts`：会话、最新角色、数据归属、加密、Redis。
-4. `oracle.service.ts`：唯一抽取、日记版本、幂等与AI证据/预算；`admin.service.ts`：共享范围与停用事务。
-5. `apps/web/src/pages`：组件化前端、真实API交互、手机视图、隐私说明。
-6. `compose.yml`、两个Dockerfile、网关与数据库初始化：独立构建和国内部署。
-7. GitHub Actions：真实数据库测试、浏览器截图、audit、最终 verified-revision.txt。请使用最终成功运行，不用早期失败运行作为结论。
+1. docs/FEATURES.md 与 docs/DIVINATION.md：已实现范围、牌阵、起卦规则与学习内容。
+2. packages/domain 与 tests/divination.test.js：32牌阵与三种起卦、互错综、旧存档兼容。
+3. apps/api/prisma/schema.prisma 和第二次迁移：私密数据关系、归属、级联删除、幂等与额度账本。
+4. model.service.ts / oracle.service.ts：全调用预算、幂等、固定引用、追问归属、搜索扫描及metadata乐观锁。
+5. membership.service.ts / personal.service.ts：额度并发、码兑换、主动同意回顾、行动与完整导出。
+6. admin.service.ts：汇总与主动共享范围、内容运营、反馈、码和权限审计，不提供私人日记/备注/对话接口。
+7. apps/web/src/pages：占卜/图鉴、记录/月历/回顾、个人星空与运营后台，手机布局及空态。
+8. public/sw.js 与 infra/nginx.conf：公开静态缓存范围、API绕过和安全头；不能缓存认证或私人响应。
+9. GitHub Actions：真实MySQL/Redis与浏览器、新旧迁移、容器及加密恢复，以最后成功的源提交为准。
 
-此 PR 不自动合并主分支，不替换原线上 Worker 站点。实际部署要在服务器完成 SMTP、模型、域名、密钥和TLS验收。没有把受控模型测试称为正式模型上线。
+本PR基于生产架构分支便于只看这次扩展，不自动合并主分支或替换线上原型。模型测试为受控HTTPS服务，邮件为隔离Mailpit，不把测试称为真实商户付款或生产上线。
