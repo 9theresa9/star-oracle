@@ -1,4 +1,4 @@
-import { test,expect,type Page } from '@playwright/test';
+import { test,expect,type Page } from './fixtures';
 import { PrismaClient } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { runInNewContext } from 'node:vm';
@@ -121,6 +121,18 @@ test('management publishing, feedback, redemption and membership use real isolat
   expect((await redeem(plus.code)).status()).toBe(201);
   await expect(member.getByRole('heading',{name:'Plus 会员',exact:true})).toBeVisible();
   await expect(member.locator('.allowance')).toContainText('今日剩余 / 20 次');
+  const redemptionTable=member.locator('.redemption-list table');
+  await expect(redemptionTable).toContainText('7 次额外 AI 额度');
+  await expect(redemptionTable).toContainText('30 天 Plus');
+  await expect(redemptionTable).toContainText(credits.item.codeHint);
+  await expect(redemptionTable).toContainText(plus.item.codeHint);
+  expect(await redemptionTable.innerText()).not.toContain(credits.code);
+  expect(await redemptionTable.innerText()).not.toContain(plus.code);
+  const redemptionHistory=await(await memberContext.request.get('/api/v1/membership/redemptions?limit=50')).json() as {items:Record<string,unknown>[]};
+  expect(redemptionHistory.items).toHaveLength(2);
+  for(const row of redemptionHistory.items){expect(row).not.toHaveProperty('code');expect(row).not.toHaveProperty('codeHash');}
+  expect(JSON.stringify(redemptionHistory)).not.toContain(credits.code);
+  expect(JSON.stringify(redemptionHistory)).not.toContain(plus.code);
   await expect(member.getByText('支付尚未开放',{exact:true})).toBeVisible();
   const payment=await(await memberContext.request.get('/api/v1/membership/payment-options')).json();
   expect(payment).toMatchObject({enabled:false,providers:[]});
