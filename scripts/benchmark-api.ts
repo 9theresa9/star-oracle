@@ -68,6 +68,7 @@ try {
    };
    const resetRow=()=>db.reading.update({where:{id:fixture.firstId},data:{shared:false,favorite:false,metadataVersion:0,
     tagsCipher:seal('["benchmark"]','reading-tags:'+fixture.owner+':'+fixture.firstId),annotation:seal('A controlled annotation','reading-note:'+fixture.owner+':'+fixture.firstId)}});
+   await resetRow(); // Each variant starts from the same state after the previous mutation cases.
    const cases:{name:string;prepare?:()=>Promise<unknown>;run:()=>Promise<any>}[]=[
     {name:'personal-insights',run:()=>personal.insights(fixture.owner,'month',fixture.date)},
     {name:'personal-calendar',run:()=>personal.calendar(fixture.owner,fixture.month)},
