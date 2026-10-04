@@ -61,3 +61,20 @@ test('account, cloud daily and private journal work end to end',async({page},inf
  await page.goto('/admin');
  await expect(page.getByRole('heading',{name:'需要管理员权限'})).toBeVisible();
 });
+
+test.describe('failed lazy route loading',()=>{
+ test.use({serviceWorkers:'block'});
+ test('module network failure keeps navigation and a clear recovery action',async({page},info)=>{
+  let blocked=false;
+  await page.route('**/src/pages/account.tsx*',route=>{blocked=true;return route.abort();});
+  await page.goto('/');
+  await expect(page.locator('.hero h1')).toBeVisible();
+  if(info.project.name!=='desktop-chromium')await page.getByRole('button',{name:'打开导航'}).click();
+  await page.locator('.nav-account').click();
+  await expect.poll(()=>blocked,'The actual lazy module request is interrupted').toBe(true);
+  await expect(page.getByRole('button',{name:'刷新页面',exact:true})).toBeVisible();
+  await expect(page.locator('.site-header')).toBeVisible();
+  await page.locator('.site-header .brand').click();
+  await expect(page.locator('.hero h1')).toBeVisible();
+ });
+});
