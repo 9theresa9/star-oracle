@@ -1,0 +1,16 @@
+node_modules
+**/node_modules
+**/dist
+.git
+.env
+.env.*
+backups
+.deploy-secrets
+test-results
+playwright-report
+
+.performance-baseline
+performance-results
+**/.performance-src
+
+**/.performance-engine.mjs

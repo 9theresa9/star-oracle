@@ -1,0 +1,135 @@
+name: star-oracle
+x-api: &api
+  build:
+    context: .
+    dockerfile: apps/api/Dockerfile
+  image: star-oracle-api:local
+  environment: &api-env
+    NODE_ENV: production
+    PORT: 3001
+    WEB_ORIGIN: https://${DOMAIN:?Set DOMAIN}
+    API_PUBLIC_URL: https://${DOMAIN:?Set DOMAIN}
+    DATABASE_URL: mysql://oracle:${MYSQL_PASSWORD:?Set MYSQL_PASSWORD}@mysql:3306/star_oracle
+    REDIS_URL: redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD}@redis:6379
+    TRUST_PROXY: linklocal,uniquelocal
+    AUTH_SECRET: ${AUTH_SECRET:?Set AUTH_SECRET}
+    DATA_ENCRYPTION_KEY: ${DATA_ENCRYPTION_KEY:?Set DATA_ENCRYPTION_KEY}
+    REQUIRE_EMAIL_VERIFICATION: 'true'
+    ADMIN_REQUIRE_2FA: 'true'
+    SMTP_HOST: ${SMTP_HOST:?Set SMTP_HOST}
+    SMTP_PORT: ${SMTP_PORT:-587}
+    SMTP_SECURE: ${SMTP_SECURE:-false}
+    SMTP_USER: ${SMTP_USER:-}
+    SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+    SMTP_FROM: ${SMTP_FROM:?Set SMTP_FROM}
+    AI_API_KEY: ${AI_API_KEY:-}
+    AI_BASE_URL: ${AI_BASE_URL:-https://api.deepseek.com/v1}
+    AI_PROVIDER_NAME: ${AI_PROVIDER_NAME:-DeepSeek}
+    AI_MODEL: ${AI_MODEL:-deepseek-chat}
+    AI_DAILY_LIMIT: ${AI_DAILY_LIMIT:-200}
+  networks: [edge, backend]
+  read_only: true
+  tmpfs: [/tmp]
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  depends_on:
+    mysql: {condition: service_healthy}
+    redis: {condition: service_healthy}
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: star_oracle
+      MYSQL_USER: oracle
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Set MYSQL_PASSWORD}
+      MYSQL_MIGRATION_PASSWORD: ${MYSQL_MIGRATION_PASSWORD:?Set MYSQL_MIGRATION_PASSWORD}
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
+    volumes: [mysql-data:/var/lib/mysql, ./infra/mysql-init.sh:/docker-entrypoint-initdb.d/10-privileges.sh:ro]
+    networks: [backend]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=$$MYSQL_PASSWORD mysqladmin ping -h 127.0.0.1 -uoracle --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    logging: {driver: json-file, options: {max-size: "10m", max-file: "3"}}
+  redis:
+    image: redis:7.4
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD}
+    command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\""]
+    volumes: [redis-data:/data]
+    networks: [backend]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=$$REDIS_PASSWORD redis-cli ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging: {driver: json-file, options: {max-size: "10m", max-file: "3"}}
+  migrate:
+    <<: *api
+    environment:
+      DATABASE_URL: mysql://oracle_migrator:${MYSQL_MIGRATION_PASSWORD:?Set MYSQL_MIGRATION_PASSWORD}@mysql:3306/star_oracle
+    networks: [backend]
+    command: ["npm", "run", "db:migrate", "-w", "@star-oracle/api"]
+    restart: "no"
+  api:
+    <<: *api
+    restart: unless-stopped
+    depends_on:
+      mysql: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/api/v1/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+    logging: {driver: json-file, options: {max-size: "10m", max-file: "3"}}
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    image: star-oracle-web:local
+    restart: unless-stopped
+    networks: [edge]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+  gateway:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN}
+      TLS_EMAIL: ${TLS_EMAIL:?Set TLS_EMAIL}
+    ports: ["80:80", "443:443"]
+    volumes: ["./infra/Caddyfile:/etc/caddy/Caddyfile:ro", "caddy-data:/data", "caddy-config:/config"]
+    networks: [edge]
+    depends_on:
+      api: {condition: service_healthy}
+      web: {condition: service_healthy}
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: [no-new-privileges:true]
+    logging: {driver: json-file, options: {max-size: "10m", max-file: "3"}}
+networks:
+  edge:
+    driver: bridge
+  backend:
+    driver: bridge
+    internal: true
+volumes:
+  mysql-data:
+  redis-data:
+  caddy-data:
+  caddy-config:

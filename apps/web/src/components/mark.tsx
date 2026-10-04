@@ -1,0 +1,1 @@
+export function StarMark({strokeWidth=2}:{strokeWidth?:number}){return <svg className="star-mark" aria-hidden="true" viewBox="0 0 100 100" fill="none"><path d="M50 6 61 39 94 50 61 61 50 94 39 61 6 50 39 39Z" stroke="currentColor" strokeWidth={strokeWidth} strokeLinejoin="round"/></svg>;}

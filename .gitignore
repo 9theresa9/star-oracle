@@ -1,0 +1,19 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+!.env.production.example
+*.log
+coverage/
+playwright-report/
+test-results/
+backups/
+.deploy-secrets/
+
+# Isolated CI performance comparison inputs and reports
+.performance-baseline/
+performance-results/
+apps/api/.performance-src/
+
+packages/domain/.performance-engine.mjs
