@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, ConflictException, BadRequestException, PayloadTooLargeException, ServiceUnavailableException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
-import { evidenceFor,DAILY_MOODS,type Interpretation,type Evidence } from '@star-oracle/domain';
+import { evidenceFor,DAILY_MOODS,type Interpretation,type Evidence,validateReading } from '@star-oracle/domain';
 import { db,seal,open,chinaDate,consumeLimit } from './infrastructure.js';
 import { OracleService,decodeReading } from './oracle.service.js';
 import { requestModel } from './model.service.js';
@@ -31,7 +31,8 @@ function decodeAction(row:Prisma.ActionPlanGetPayload<Record<string,never>>){
 export function decodeFeedback(row:Prisma.FeedbackGetPayload<Record<string,never>>){
  return {id:row.id,category:row.category,body:open(row.bodyCipher,'feedback:'+row.userId+':'+row.id),status:row.status,adminReply:row.adminReplyCipher?open(row.adminReplyCipher,'feedback-reply:'+row.userId+':'+row.id):null,version:row.version,createdAt:row.createdAt.toISOString(),updatedAt:row.updatedAt.toISOString()};
 }
-function decodeReport(row:Prisma.ReviewReportGetPayload<Record<string,never>>){
+const reportSelect={id:true,userId:true,period:true,startDate:true,endDate:true,includeJournal:true,status:true,resultCipher:true,createdAt:true} satisfies Prisma.ReviewReportSelect;
+function decodeReport(row:Pick<Prisma.ReviewReportGetPayload<Record<string,never>>,'id'|'userId'|'period'|'startDate'|'endDate'|'includeJournal'|'status'|'resultCipher'|'createdAt'>){
  return {id:row.id,period:row.period,startDate:row.startDate,endDate:row.endDate,includeJournal:row.includeJournal,status:row.status,result:row.resultCipher?JSON.parse(open(row.resultCipher,'review:'+row.userId+':'+row.id)) as Interpretation:null,createdAt:row.createdAt.toISOString()};
 }
 export function decodeContent(row:Prisma.SiteContentGetPayload<Record<string,never>>){
@@ -41,23 +42,23 @@ export function decodeContent(row:Prisma.SiteContentGetPayload<Record<string,nev
 export class PersonalService {
  async calendar(userId:string,month:string){
   const range=periodRange('month',month+'-01');
-  const rows=await db.dailyEntry.findMany({where:{userId,date:{gte:range.startDate,lt:range.endExclusive}},orderBy:{date:'asc'}});
+  const rows=await db.dailyEntry.findMany({where:{userId,date:{gte:range.startDate,lt:range.endExclusive}},orderBy:{date:'asc'},select:{id:true,date:true,mood:true,note:true}});
   return {month,days:rows.map(row=>({id:row.id,date:row.date,mood:row.mood,notePresent:!!open(row.note,'journal:'+userId+':'+row.id).trim()})),summary:{entries:rows.length,moods:DAILY_MOODS.map(m=>({mood:m.id,count:rows.filter(row=>row.mood===m.id).length}))}};
  }
  async insights(userId:string,period:Period,date:string){
   const range=periodRange(period,date),where={userId,createdAt:{gte:range.from,lt:range.to}};
-  const [readings,dailyEntries,completedActions,kinds,moods]=await Promise.all([
-   db.reading.count({where}),db.dailyEntry.count({where:{userId,date:{gte:range.startDate,lt:range.endExclusive}}}),
+  const [completedActions,kinds,moods]=await Promise.all([
    db.actionPlan.count({where:{userId,completedAt:{gte:range.from,lt:range.to}}}),
    db.reading.groupBy({by:['kind'],where,_count:{_all:true}}),
    db.dailyEntry.groupBy({by:['mood'],where:{userId,date:{gte:range.startDate,lt:range.endExclusive}},_count:{_all:true}})
   ]);
+  const readings=kinds.reduce((sum,row)=>sum+row._count._all,0),dailyEntries=moods.reduce((sum,row)=>sum+row._count._all,0);
   return {period,startDate:range.startDate,endDate:range.endDate,summary:{readings,dailyEntries,completedActions,moods:DAILY_MOODS.map(m=>({mood:m.id,count:moods.find(row=>row.mood===m.id)?._count._all??0}))},readingKinds:kinds.map(row=>({kind:row.kind,count:row._count._all})),journalIncluded:false,
    reflection:{summary:'这段时间，你保存了 '+readings+' 次探索、'+dailyEntries+' 天星笺，完成了 '+completedActions+' 个行动。',actions:['选择一条仍然有帮助的建议，写成下一步小行动。','回看事实与感受有哪些变化，允许自己调整原来的计划。'],reflection:'这段时间，什么最值得保留，什么可以放下？'}};
  }
  async actions(userId:string,page:{cursor?:string;limit:number;status:'all'|'open'|'done'}){
   const where={userId,...(page.status==='open'?{completedAt:null}:page.status==='done'?{completedAt:{not:null}}:{})};
-  if(page.cursor&&!await db.actionPlan.findFirst({where:{id:page.cursor,...where}}))throw new NotFoundException('行动不存在');
+  if(page.cursor&&!await db.actionPlan.findFirst({where:{id:page.cursor,...where},select:{id:true}}))throw new NotFoundException('行动不存在');
   const rows=await db.actionPlan.findMany({where,take:page.limit+1,orderBy:[{createdAt:'desc'},{id:'desc'}],...(page.cursor?{cursor:{id:page.cursor},skip:1}:{})});
   return {items:rows.slice(0,page.limit).map(decodeAction),nextCursor:rows.length>page.limit?rows[page.limit-1]!.id:null};
  }
@@ -88,7 +89,7 @@ export class PersonalService {
   });return {ok:true};
  }
  async feedback(userId:string,page:{cursor?:string;limit:number}){
-  if(page.cursor&&!await db.feedback.findFirst({where:{id:page.cursor,userId}}))throw new NotFoundException('反馈不存在');
+  if(page.cursor&&!await db.feedback.findFirst({where:{id:page.cursor,userId},select:{id:true}}))throw new NotFoundException('反馈不存在');
   const rows=await db.feedback.findMany({where:{userId},take:page.limit+1,orderBy:[{createdAt:'desc'},{id:'desc'}],...(page.cursor?{cursor:{id:page.cursor},skip:1}:{})});
   return {items:rows.slice(0,page.limit).map(decodeFeedback),nextCursor:rows.length>page.limit?rows[page.limit-1]!.id:null};
  }
@@ -101,8 +102,8 @@ export class PersonalService {
   });return decodeFeedback(row);
  }
  async reports(userId:string,page:{cursor?:string;limit:number}){
-  if(page.cursor&&!await db.reviewReport.findFirst({where:{id:page.cursor,userId}}))throw new NotFoundException('回顾不存在');
-  const rows=await db.reviewReport.findMany({where:{userId},take:page.limit+1,orderBy:[{createdAt:'desc'},{id:'desc'}],...(page.cursor?{cursor:{id:page.cursor},skip:1}:{})});
+  if(page.cursor&&!await db.reviewReport.findFirst({where:{id:page.cursor,userId},select:{id:true}}))throw new NotFoundException('回顾不存在');
+  const rows=await db.reviewReport.findMany({where:{userId},select:reportSelect,take:page.limit+1,orderBy:[{createdAt:'desc'},{id:'desc'}],...(page.cursor?{cursor:{id:page.cursor},skip:1}:{})});
   return {items:rows.slice(0,page.limit).map(decodeReport),nextCursor:rows.length>page.limit?rows[page.limit-1]!.id:null};
  }
  async removeReport(userId:string,id:string,requestId:string){
@@ -134,11 +135,15 @@ export class PersonalService {
    if(existing.inputCipher)snapshot=JSON.parse(open(existing.inputCipher,'review-input:'+userId+':'+id));
    else {
     const summary=await this.insights(userId,input.period,input.date);
-    const [records,journal]=await Promise.all([db.reading.findMany({where:{userId,createdAt:{gte:range.from,lt:range.to}},orderBy:{createdAt:'desc'},take:6}),db.dailyEntry.findMany({where:{userId,date:{gte:range.startDate,lt:range.endExclusive}},orderBy:{date:'asc'},take:31})]);
-    const readings=records.map(row=>decodeReading(row).reading);
+    const [records,journal]=await Promise.all([
+     db.reading.findMany({where:{userId,createdAt:{gte:range.from,lt:range.to}},orderBy:{createdAt:'desc'},take:6,select:{id:true,question:true,payload:true}}),
+     input.includeJournal?db.dailyEntry.findMany({where:{userId,date:{gte:range.startDate,lt:range.endExclusive}},orderBy:{date:'desc'},take:10,select:{id:true,date:true,mood:true,note:true}}):db.dailyEntry.findMany({where:{userId,date:{gte:range.startDate,lt:range.endExclusive}},orderBy:{date:'asc'},take:31,select:{id:true,date:true,mood:true}})
+    ]);
+    if(input.includeJournal)journal.reverse();
+    const readings=records.map(row=>validateReading({...row.payload as object,question:open(row.question,'question:'+userId+':'+row.id)}));
     const evidence:Evidence[]=[{reference:'period',name:range.startDate+' 至 '+range.endDate,position:'本人的实际记录统计',keywords:['探索 '+summary.summary.readings+' 次','星笺 '+summary.summary.dailyEntries+' 天','完成行动 '+summary.summary.completedActions+' 项']}];
     for(const reading of readings)for(const e of evidenceFor(reading).slice(0,2))evidence.push({...e,reference:reading.id+':'+e.reference});
-    const context=JSON.stringify({period:input.period,startDate:range.startDate,endDate:range.endDate,statistics:summary.summary,selection:'最多最近6次探索；未覆盖的记录不推断',readings:readings.map(r=>({id:r.id,question:r.question})),daily:(input.includeJournal?journal.slice(-10):journal).map(row=>({date:row.date,mood:row.mood,...(input.includeJournal?{note:open(row.note,'journal:'+userId+':'+row.id).slice(0,500)}:{})})),journalIncluded:input.includeJournal,journalSelection:input.includeJournal?'最多最近10天，每条最多500字；不推断未包含的日记':'日记正文未发送'});
+    const context=JSON.stringify({period:input.period,startDate:range.startDate,endDate:range.endDate,statistics:summary.summary,selection:'最多最近6次探索；未覆盖的记录不推断',readings:readings.map(r=>({id:r.id,question:r.question})),daily:(input.includeJournal?journal.slice(-10):journal).map(row=>({date:row.date,mood:row.mood,...(input.includeJournal?{note:open('note' in row&&typeof row.note==='string'?row.note:'','journal:'+userId+':'+row.id).slice(0,500)}:{})})),journalIncluded:input.includeJournal,journalSelection:input.includeJournal?'最多最近10天，每条最多500字；不推断未包含的日记':'日记正文未发送'});
     snapshot={question:'请基于我的真实记录做一份'+(input.period==='week'?'每周':'每月')+'反思回顾，分清记录事实与建议，不预测未来或诊断心理状况。',evidence,context};
     const savedInput=await db.reviewReport.updateMany({where:{id,userId,status:'pending',inputCipher:null},data:{inputCipher:seal(JSON.stringify(snapshot),'review-input:'+userId+':'+id)}});
     if(savedInput.count!==1)throw new ConflictException('回顾状态已改变，请刷新');
@@ -170,7 +175,7 @@ export class PersonalService {
   ) AS owned_sizes`);
   if(Number(sizes[0]?.size??0)>12000000)throw new PayloadTooLargeException('导出文件较大，请联系管理员安排分批导出');
   const [readings,daily,actions,reports,conversations,feedback,ledger,membership,redemptions]=await Promise.all([
-   db.reading.findMany({where,orderBy:{createdAt:'asc'}}),db.dailyEntry.findMany({where,orderBy:{date:'asc'}}),db.actionPlan.findMany({where,orderBy:{createdAt:'asc'}}),db.reviewReport.findMany({where,orderBy:{createdAt:'asc'}}),db.readingConversation.findMany({where,orderBy:{createdAt:'asc'}}),db.feedback.findMany({where,orderBy:{createdAt:'asc'}}),db.creditLedger.findMany({where,orderBy:{createdAt:'asc'},select:{id:true,kind:true,amount:true,balance:true,createdAt:true}}),new MembershipService().get(userId),db.redemption.findMany({where,orderBy:{createdAt:'asc'},select:{id:true,createdAt:true,codeId:true,code:{select:{codeHint:true,kind:true,amount:true,durationDays:true}}}})
+   db.reading.findMany({where,orderBy:{createdAt:'asc'}}),db.dailyEntry.findMany({where,orderBy:{date:'asc'}}),db.actionPlan.findMany({where,orderBy:{createdAt:'asc'}}),db.reviewReport.findMany({where,select:reportSelect,orderBy:{createdAt:'asc'}}),db.readingConversation.findMany({where,orderBy:{createdAt:'asc'}}),db.feedback.findMany({where,orderBy:{createdAt:'asc'}}),db.creditLedger.findMany({where,orderBy:{createdAt:'asc'},select:{id:true,kind:true,amount:true,balance:true,createdAt:true}}),new MembershipService().get(userId),db.redemption.findMany({where,orderBy:{createdAt:'asc'},select:{id:true,createdAt:true,codeId:true,code:{select:{codeHint:true,kind:true,amount:true,durationDays:true}}}})
   ]);
   const oracle=new OracleService();
   const result={version:2,exportedAt:new Date().toISOString(),readings:readings.map(row=>decodeReading(row)),daily:daily.map(row=>oracle.decodeDaily(row)),actions:actions.map(decodeAction),reports:reports.map(decodeReport),conversations:conversations.map(row=>({id:row.id,readingId:row.readingId,prompt:open(row.promptCipher,'conversation-prompt:'+userId+':'+row.id),answer:row.answerCipher?JSON.parse(open(row.answerCipher,'conversation-answer:'+userId+':'+row.id)):null,status:row.status,createdAt:row.createdAt.toISOString()})),feedback:feedback.map(decodeFeedback),membership,creditLedger:ledger,redemptions:redemptions.map(({code,...row})=>({...row,...code,createdAt:row.createdAt.toISOString()}))};

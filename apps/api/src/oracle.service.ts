@@ -10,12 +10,13 @@ import { requestModel,initialInterpretationId } from './model.service.js';
 type Stored=Prisma.ReadingGetPayload<Record<string,never>>;
 export type ReadingFilters={cursor?:string;limit:number;q?:string;kind?:'tarot'|'iching';favorite?:boolean;tag?:string;dateFrom?:string;dateTo?:string};
 export type ReadingMetadata={favorite:boolean;tags:string[];note:string;version:number};
-export function decodeReading(row:Stored,includeMetadata=true) {
+export type ReadingProjection=Pick<Stored,'id'|'userId'|'payload'|'question'|'interpretation'|'ai'|'shared'|'createdAt'>&Partial<Pick<Stored,'favorite'|'tagsCipher'|'annotation'|'metadataVersion'>>;
+export function decodeReading(row:ReadingProjection,includeMetadata=true) {
  const reading=validateReading({...row.payload as object,question:open(row.question,'question:'+row.userId+':'+row.id)});
  return {id:row.id,reading,interpretation:row.interpretation?JSON.parse(open(row.interpretation,'interpretation:'+row.userId+':'+row.id)) as Interpretation:basicInterpretation(reading),
-   ai:row.ai,shared:row.shared,createdAt:row.createdAt.toISOString(),favorite:includeMetadata?row.favorite:false,
+   ai:row.ai,shared:row.shared,createdAt:row.createdAt.toISOString(),favorite:includeMetadata?(row.favorite??false):false,
    tags:includeMetadata&&row.tagsCipher?JSON.parse(open(row.tagsCipher,'reading-tags:'+row.userId+':'+row.id)) as string[]:[],
-   note:includeMetadata&&row.annotation?open(row.annotation,'reading-note:'+row.userId+':'+row.id):'',metadataVersion:includeMetadata?row.metadataVersion:0};
+   note:includeMetadata&&row.annotation?open(row.annotation,'reading-note:'+row.userId+':'+row.id):'',metadataVersion:includeMetadata?(row.metadataVersion??0):0};
 }
 function verifyDuplicate(row:Stored,input:CreateReadingInput) {
  const saved=decodeReading(row),reading=saved.reading,options=(row.payload as Record<string,unknown>)._createOptions as {allowReversed?:boolean}|undefined;
@@ -79,41 +80,53 @@ export class OracleService {
  }
  async list(userId:string,query:ReadingFilters) {
   const {cursor,limit,q,tag,kind,favorite,dateFrom,dateTo}=query;
-  if(cursor)await this.owned(userId,cursor);
+  if(cursor&&!await db.reading.findFirst({where:{id:cursor,userId},select:{id:true}}))throw new NotFoundException('记录不存在');
   const where:Prisma.ReadingWhereInput={userId,...(kind?{kind}:{}),...(favorite!==undefined?{favorite}:{}),
    ...(dateFrom||dateTo?{createdAt:{...(dateFrom?{gte:dateBoundary(dateFrom)}:{}),...(dateTo?{lt:dateBoundary(dateTo,true)}:{})}}:{})};
   if(!q&&!tag){
    const rows=await db.reading.findMany({where,orderBy:[{createdAt:'desc'},{id:'desc'}],take:limit+1,...(cursor?{cursor:{id:cursor},skip:1}:{})});
    return {items:rows.slice(0,limit).map(row=>decodeReading(row)),nextCursor:rows.length>limit?rows[limit-1]!.id:null};
   }
-  // Search only owned, decrypted rows. A bounded scan returns a continuation
-  // cursor even when no match is found, so later matches are never lost.
-  const items:ReturnType<typeof decodeReading>[]=[],needle=q?.trim().toLocaleLowerCase();
-  let position=cursor,scanned=0;
-  while(scanned<600){
-   const take=Math.min(150,600-scanned);
-   const rows=await db.reading.findMany({where,orderBy:[{createdAt:'desc'},{id:'desc'}],take,...(position?{cursor:{id:position},skip:1}:{})});
-   if(!rows.length)return {items,nextCursor:null};
-   for(const row of rows){
-    const record=decodeReading(row);position=row.id;scanned++;
-    if((!tag||record.tags.includes(tag))&&(!needle||[record.reading.question,record.note,...record.tags].some(text=>text.toLocaleLowerCase().includes(needle))))items.push(record);
-    if(items.length===limit){
-     const after=await db.reading.findMany({where,orderBy:[{createdAt:'desc'},{id:'desc'}],take:1,cursor:{id:position},skip:1,select:{id:true}});
-     return {items,nextCursor:after.length?position:null};
-    }
+  const needle=q?.trim().toLocaleLowerCase();
+  type SearchRow=Pick<Stored,'id'|'question'|'tagsCipher'|'annotation'>;
+  const matches=(row:SearchRow)=>{
+   const tags=row.tagsCipher?JSON.parse(open(row.tagsCipher,'reading-tags:'+userId+':'+row.id)) as string[]:[];
+   if(tag&&!tags.includes(tag))return false;
+   if(!needle)return true;
+   const question=open(row.question,'question:'+userId+':'+row.id);
+   const note=row.annotation?open(row.annotation,'reading-note:'+userId+':'+row.id):'';
+   return [question,note,...tags].some(text=>text.toLocaleLowerCase().includes(needle));
+  };
+  // Read one lookahead row, but scan at most 600. Only matching rows need a full payload.
+  const matchedIds:string[]=[];let position=cursor,scanned=0,hasMore=false;
+  while(scanned<600&&matchedIds.length<limit){
+   const scanLimit=Math.min(150,600-scanned);
+   const rows=await db.reading.findMany({where,orderBy:[{createdAt:'desc'},{id:'desc'}],take:scanLimit+1,
+    select:{id:true,question:true,tagsCipher:true,annotation:true},...(position?{cursor:{id:position},skip:1}:{})});
+   hasMore=false;
+   for(let index=0;index<Math.min(scanLimit,rows.length);index++){
+    const row=rows[index]!;position=row.id;scanned++;hasMore=index+1<rows.length;
+    if(matches(row))matchedIds.push(row.id);
+    if(matchedIds.length===limit)break;
    }
-   if(rows.length<take)return {items,nextCursor:null};
+   if(!hasMore)break;
   }
-  const after=await db.reading.findMany({where,orderBy:[{createdAt:'desc'},{id:'desc'}],take:1,cursor:{id:position!},skip:1,select:{id:true}});
-  return {items,nextCursor:after.length?position:null};
+  if(!matchedIds.length)return {items:[],nextCursor:hasMore?position??null:null};
+  const records=await db.reading.findMany({where:{...where,id:{in:matchedIds}}});
+  const byId=new Map(records.map(row=>[row.id,row]));
+  const items=matchedIds.flatMap(id=>{const row=byId.get(id);return row&&matches(row)?[decodeReading(row)]:[];});
+  return {items,nextCursor:hasMore?position??null:null};
  }
  async get(userId:string,id:string){return decodeReading(await this.owned(userId,id));}
  async metadata(userId:string,id:string,input:ReadingMetadata,requestId:string) {
-  await this.owned(userId,id);
   const tags=[...new Set(input.tags.map(tag=>tag.trim()).filter(Boolean))];
+  const data={favorite:input.favorite,tagsCipher:seal(JSON.stringify(tags),'reading-tags:'+userId+':'+id),annotation:seal(input.note.trim(),'reading-note:'+userId+':'+id),metadataVersion:{increment:1}};
   await db.$transaction(async tx=>{
-   const changed=await tx.reading.updateMany({where:{id,userId,metadataVersion:input.version},data:{favorite:input.favorite,tagsCipher:seal(JSON.stringify(tags),'reading-tags:'+userId+':'+id),annotation:seal(input.note.trim(),'reading-note:'+userId+':'+id),metadataVersion:{increment:1}}});
-   if(changed.count!==1)throw new ConflictException('记录已在其他设备更新，请先加载云端版本');
+   const changed=await tx.reading.updateMany({where:{id,userId,metadataVersion:input.version},data});
+   if(changed.count!==1){
+    if(!await tx.reading.findFirst({where:{id,userId},select:{id:true}}))throw new NotFoundException('记录不存在');
+    throw new ConflictException('记录已在其他设备更新，请先加载云端版本');
+   }
    await tx.auditLog.create({data:{id:randomUUID(),actorId:userId,action:'reading.metadata',targetId:id,requestId}});
   });
   return this.get(userId,id);
@@ -126,9 +139,9 @@ export class OracleService {
   });return {ok:true};
  }
  async share(userId:string,id:string,shared:boolean,requestId:string) {
-  await this.owned(userId,id);
   await db.$transaction(async tx=>{
-   await tx.reading.updateMany({where:{id,userId},data:{shared}});
+   const changed=await tx.reading.updateMany({where:{id,userId},data:{shared}});
+   if(changed.count!==1&&!await tx.reading.findFirst({where:{id,userId},select:{id:true}}))throw new NotFoundException('记录不存在');
    await tx.auditLog.create({data:{id:randomUUID(),actorId:userId,action:shared?'reading.share':'reading.unshare',targetId:id,requestId}});
   });return this.get(userId,id);
  }

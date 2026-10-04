@@ -78,6 +78,17 @@ export function castNumberLines(numbers) {
 }
 
 /** Solar Gregorian adaptation. This deliberately does not claim traditional lunar calculation. */
+const timeFormatters=new Map();
+function timeFormatter(timeZone){
+ let formatter=timeFormatters.get(timeZone);
+ if(!formatter){
+  formatter=new Intl.DateTimeFormat('en-CA',{timeZone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',hourCycle:'h23'});
+  if(timeFormatters.size>=16)timeFormatters.delete(timeFormatters.keys().next().value);
+  timeFormatters.set(timeZone,formatter);
+ }
+ return formatter;
+}
+
 export function castTimeLines(timestamp, timeZone = 'Asia/Shanghai') {
   const match = typeof timestamp === 'string' && timestamp.length <= 64 &&
     timestamp.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})$/);
@@ -92,9 +103,7 @@ export function castTimeLines(timestamp, timeZone = 'Asia/Shanghai') {
   if (!Number.isFinite(date.getTime())) throw new Error('起卦日期无效');
   let parts;
   try {
-    parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
-      timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23'
-    }).formatToParts(date).filter(p => p.type !== 'literal').map(p => [p.type, Number(p.value)]));
+    parts = Object.fromEntries(timeFormatter(timeZone).formatToParts(date).filter(p => p.type !== 'literal').map(p => [p.type, Number(p.value)]));
   } catch { throw new Error('起卦时区无效'); }
   const earthlyHour = Math.floor(((parts.hour + 1) % 24) / 2) + 1;
   const dateSum = parts.year + parts.month + parts.day;
@@ -103,7 +112,7 @@ export function castTimeLines(timestamp, timeZone = 'Asia/Shanghai') {
     inputs: { timestamp: date.toISOString(), timeZone } };
 }
 
-export function validateReading(value) {
+function validateReadingWithAnalysis(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value) || value.version !== 1 ||
       typeof value.id !== 'string' || !/^[a-zA-Z0-9-]{8,80}$/.test(value.id) ||
       typeof value.question !== 'string' || value.question.trim().length < 2 ||
@@ -126,10 +135,10 @@ export function validateReading(value) {
       seen.add(item.id);
       return { id: item.id, reversed: item.reversed };
     });
-    return { ...base, spread: value.spread, cards };
+    return { reading:{ ...base, spread: value.spread, cards } };
   }
   if (value.kind === 'iching') {
-    analyseLines(value.lines);
+    const analysis=analyseLines(value.lines);
     const result = { ...base, lines: [...value.lines] };
     if (value.method !== undefined) {
       if (!['coins', 'numbers', 'time'].includes(value.method)) throw new Error('起卦方式无效');
@@ -141,20 +150,25 @@ export function validateReading(value) {
         result.casting = cast.inputs;
       } else if (value.casting !== undefined) throw new Error('硬币法无需数字或时间参数');
     } else if (value.casting !== undefined) throw new Error('起卦参数需要对应起卦方式');
-    return result;
+    return {reading:result,analysis};
   }
   throw new Error('探索方式无效');
 }
 
+export function validateReading(value){return validateReadingWithAnalysis(value).reading;}
+
 export function evidenceFor(input) {
-  const reading = validateReading(input);
+  const {reading,analysis}=validateReadingWithAnalysis(input);
+  return evidenceForValidated(reading,analysis);
+}
+function evidenceForValidated(reading,analysis) {
   if (reading.kind === 'tarot') return reading.cards.map((item, index) => {
     const card = cardsById.get(item.id);
     return { reference: card.id, name: card.name, english: card.en, mark: card.mark,
       position: SPREADS[reading.spread].positions[index], reversed: item.reversed,
       keywords: [...(item.reversed ? card.reversed : card.upright)] };
   });
-  const result = analyseLines(reading.lines);
+  const result = analysis;
   const evidence = [{ reference: 'hexagram:' + result.original.number, position: '本卦', ...result.original }];
   if (result.moving.length) evidence.push({
     reference: 'hexagram:' + result.resulting.number, position: '变卦', ...result.resulting
@@ -163,7 +177,7 @@ export function evidenceFor(input) {
 }
 
 export function basicInterpretation(input) {
-  const reading = validateReading(input), evidence = evidenceFor(reading);
+  const {reading,analysis}=validateReadingWithAnalysis(input),evidence=evidenceForValidated(reading,analysis);
   if (reading.kind === 'tarot') return {
     summary: '从这组牌的象征出发，整理眼前的情境，找到一个可以亲自验证的小行动。',
     insights: evidence.map(item => ({ reference: item.reference,
@@ -172,7 +186,7 @@ export function basicInterpretation(input) {
     actions: ['写下问题中你能影响的一件事。', '选一个成本小、可调整的行动，做完后观察实际反馈。'],
     reflection: '如果暂时放下对答案的期待，你现在最需要看清的是什么？'
   };
-  const result = analyseLines(reading.lines);
+  const result = analysis;
   return {
     summary: '本卦呈现“' + result.original.theme + '”的观察角度。' +
       (result.moving.length ? '第 ' + result.moving.join('、') + ' 爻为动爻，变化后的主题是“' +

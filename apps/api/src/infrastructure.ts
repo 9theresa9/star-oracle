@@ -32,8 +32,9 @@ export async function acquireAILease():Promise<string|null> {
   const ok=await redis.eval("redis.call('ZREMRANGEBYSCORE',KEYS[1],'-inf',ARGV[1]);if redis.call('ZCARD',KEYS[1])>=4 then return 0 end;redis.call('ZADD',KEYS[1],ARGV[2],ARGV[3]);redis.call('EXPIRE',KEYS[1],120);return 1",1,'ai:leases',now,now+60000,id);
   return Number(ok)===1?id:null;
 }
+const chinaDateFormatter = new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'});
 export function chinaDate(now=new Date()):string {
-  return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(now);
+  return chinaDateFormatter.format(now);
 }
 
 export async function connectRedis():Promise<void> {

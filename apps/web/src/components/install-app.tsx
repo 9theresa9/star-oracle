@@ -1,8 +1,14 @@
 import { useEffect,useState,useRef } from 'react';
 import { Download,Share,X,PlusSquare } from 'lucide-react';
 import { Button,Notice } from './ui';
-import '../pages/management.css';
+import './install-app.css';
 type InstallPrompt=Event&{prompt:()=>Promise<void>;userChoice:Promise<{outcome:'accepted'|'dismissed';platform:string}>};
+// React StrictMode can mount the shell twice; share only the registration promise.
+let registration:Promise<ServiceWorkerRegistration>|null=null;
+function registerWorker(){
+ if(!registration)registration=navigator.serviceWorker.register('/sw.js',{scope:'/',updateViaCache:'none'}).catch(error=>{registration=null;throw error;});
+ return registration;
+}
 export function InstallApp(){
  const [prompt,setPrompt]=useState<InstallPrompt|null>(null),[open,setOpen]=useState(false),[installed,setInstalled]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState<unknown>(null);
  const dialog=useRef<HTMLDivElement>(null);
@@ -12,7 +18,7 @@ export function InstallApp(){
   const capture=(event:Event)=>{event.preventDefault();setPrompt(event as InstallPrompt);};
   const done=()=>{setInstalled(true);setPrompt(null);setOpen(false);};
   window.addEventListener('beforeinstallprompt',capture);window.addEventListener('appinstalled',done);
-  if('serviceWorker' in navigator&&window.isSecureContext)void navigator.serviceWorker.register('/sw.js',{scope:'/',updateViaCache:'none'}).catch(()=>{/* Installation remains optional when browser storage is unavailable. */});
+  if('serviceWorker' in navigator&&window.isSecureContext)void registerWorker().catch(()=>{/* Installation remains optional when browser storage is unavailable. */});
   return ()=>{window.removeEventListener('beforeinstallprompt',capture);window.removeEventListener('appinstalled',done);};
  },[]);
  useEffect(()=>{

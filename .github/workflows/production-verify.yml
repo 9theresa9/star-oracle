@@ -1,9 +1,9 @@
 name: Production architecture verification
 on:
   push:
-    branches: [main, feat/production-architecture, feat/comprehensive-oracle]
+    branches: [main, feat/comprehensive-oracle]
   pull_request:
-    paths: ['apps/**', 'packages/**', 'compose*.yml', 'infra/**', 'tests/e2e/**', 'package*.json', '.github/workflows/production-verify.yml']
+    paths: ['apps/**', 'packages/**', 'compose*.yml', 'infra/**', 'tests/e2e/**', 'package*.json', 'scripts/**', '.github/workflows/production-verify.yml']
 permissions:
   contents: read
 concurrency:
@@ -74,6 +74,46 @@ jobs:
           MOCK_TLS_CERT: /tmp/star-oracle-tls/cert.pem
           MOCK_TLS_KEY: /tmp/star-oracle-tls/key.pem
           MAILPIT_URL: http://127.0.0.1:8025
+      - name: Checkout fixed performance baseline
+        if: github.event_name == 'push'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: a639057e9884efb53fb712d7a41b0d16e8cbf0c3
+          path: .performance-baseline
+          persist-credentials: false
+      - name: Install baseline dependencies and Prisma client
+        if: github.event_name == 'push'
+        working-directory: .performance-baseline
+        run: |
+          npm ci --include=dev
+          npm run db:generate
+      - name: Build baseline web in production mode
+        if: github.event_name == 'push'
+        working-directory: .performance-baseline
+        env:
+          NODE_ENV: production
+        run: npm exec --workspace @star-oracle/web -- vite build --manifest
+      - name: Build optimized web in production mode
+        if: github.event_name == 'push'
+        env:
+          NODE_ENV: production
+        run: npm exec --workspace @star-oracle/web -- vite build --manifest --outDir "$RUNNER_TEMP/star-oracle-web-production"
+      - name: Compare initial production assets with baseline
+        if: github.event_name == 'push'
+        env:
+          PERFORMANCE_BASELINE_DIR: ${{ github.workspace }}/.performance-baseline
+          PERFORMANCE_WEB_DIST: ${{ runner.temp }}/star-oracle-web-production
+        run: node scripts/compare-web-performance.mjs
+      - name: Compare domain calculations and time formatter reuse
+        if: github.event_name == 'push'
+        env:
+          PERFORMANCE_BASELINE_DIR: ${{ github.workspace }}/.performance-baseline
+        run: node scripts/compare-domain-performance.mjs
+      - name: Compare API work and response compatibility
+        if: github.event_name == 'push'
+        env:
+          PERFORMANCE_BASELINE_DIR: ${{ github.workspace }}/.performance-baseline
+        run: node scripts/compare-api-performance.mjs
       - name: Audit runtime dependencies
         run: npm audit --omit=dev --audit-level=high
       - run: npx playwright install --with-deps chromium webkit
@@ -102,4 +142,5 @@ jobs:
             playwright-report/
             apps/web/dist/
             apps/api/prisma/migrations/
+            performance-results/
           retention-days: 14

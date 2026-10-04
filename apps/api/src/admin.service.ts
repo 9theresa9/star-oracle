@@ -26,8 +26,8 @@ export class AdminService {
   });return {ok:true};
  }
  async shared(actorId:string,requestId:string,{cursor,limit}:{cursor?:string;limit:number}) {
-  if(cursor&&!await db.reading.findFirst({where:{id:cursor,shared:true}}))throw new NotFoundException('共享记录不存在');
-  const rows=await db.reading.findMany({where:{shared:true},take:limit+1,orderBy:[{createdAt:'desc'},{id:'desc'}],...(cursor?{cursor:{id:cursor},skip:1}:{})});
+  if(cursor&&!await db.reading.findFirst({where:{id:cursor,shared:true},select:{id:true}}))throw new NotFoundException('共享记录不存在');
+  const rows=await db.reading.findMany({where:{shared:true},select:{id:true,userId:true,payload:true,question:true,interpretation:true,ai:true,shared:true,createdAt:true},take:limit+1,orderBy:[{createdAt:'desc'},{id:'desc'}],...(cursor?{cursor:{id:cursor},skip:1}:{})});
   await audit(actorId,'admin.read_shared',null,requestId);
   return {items:rows.slice(0,limit).map(row=>decodeReading(row,false)),nextCursor:rows.length>limit?rows[limit-1]!.id:null};
  }
@@ -39,19 +39,21 @@ export class AdminService {
   const endDate=chinaDate(),to=new Date(endDate+'T00:00:00Z');to.setUTCDate(to.getUTCDate()+1);
   const fromDay=new Date(endDate+'T00:00:00Z');fromDay.setUTCDate(fromDay.getUTCDate()-(days-1));
   const startDate=fromDay.toISOString().slice(0,10),endExclusive=to.toISOString().slice(0,10);
-  const from=new Date(startDate+'T00:00:00+08:00'),end=new Date(endExclusive+'T00:00:00+08:00'),where={createdAt:{gte:from,lt:end}};
-  const [users,readings,daily,ai,kinds,feedback]=await Promise.all([
+  const from=new Date(startDate+'T00:00:00+08:00'),end=new Date(endExclusive+'T00:00:00+08:00');
+  const [users,readingGroups,daily,ai,feedback]=await Promise.all([
    db.$queryRaw<{date:string;count:bigint}[]>(Prisma.sql`SELECT DATE_FORMAT(CONVERT_TZ(createdAt,'+00:00','+08:00'),'%Y-%m-%d') AS date,COUNT(*) AS count FROM user WHERE createdAt >= ${from} AND createdAt < ${end} GROUP BY date`),
-   db.$queryRaw<{date:string;count:bigint}[]>(Prisma.sql`SELECT DATE_FORMAT(CONVERT_TZ(createdAt,'+00:00','+08:00'),'%Y-%m-%d') AS date,COUNT(*) AS count FROM reading WHERE createdAt >= ${from} AND createdAt < ${end} GROUP BY date`),
+   db.$queryRaw<{date:string;kind:string;count:bigint}[]>(Prisma.sql`SELECT DATE_FORMAT(CONVERT_TZ(createdAt,'+00:00','+08:00'),'%Y-%m-%d') AS date,kind,COUNT(*) AS count FROM reading WHERE createdAt >= ${from} AND createdAt < ${end} GROUP BY date,kind`),
    db.dailyEntry.groupBy({by:['date'],where:{date:{gte:startDate,lt:endExclusive}},_count:{_all:true}}),
    db.aIUsage.findMany({where:{date:{gte:startDate,lt:endExclusive}},select:{date:true,requests:true}}),
-   db.reading.groupBy({by:['kind'],where,_count:{_all:true}}),db.feedback.groupBy({by:['status'],_count:{_all:true}})
+   db.feedback.groupBy({by:['status'],_count:{_all:true}})
   ]);
+  const readingCounts=new Map<string,number>(),kindCounts=new Map<string,number>();
+  for(const row of readingGroups){const count=Number(row.count);readingCounts.set(row.date,(readingCounts.get(row.date)??0)+count);kindCounts.set(row.kind,(kindCounts.get(row.kind)??0)+count);}
   const series=Array.from({length:days},(_,index)=>{
    const date=new Date(fromDay);date.setUTCDate(date.getUTCDate()+index);const key=date.toISOString().slice(0,10);
-   return {date:key,users:Number(users.find(row=>row.date===key)?.count??0),readings:Number(readings.find(row=>row.date===key)?.count??0),dailyEntries:daily.find(row=>row.date===key)?._count._all??0,aiRequests:ai.find(row=>row.date===key)?.requests??0};
+   return {date:key,users:Number(users.find(row=>row.date===key)?.count??0),readings:readingCounts.get(key)??0,dailyEntries:daily.find(row=>row.date===key)?._count._all??0,aiRequests:ai.find(row=>row.date===key)?.requests??0};
   });
-  return {days,startDate,endDate,series,readingKinds:kinds.map(row=>({kind:row.kind,count:row._count._all})),totals:series.reduce((sum,row)=>({users:sum.users+row.users,readings:sum.readings+row.readings,dailyEntries:sum.dailyEntries+row.dailyEntries,aiRequests:sum.aiRequests+row.aiRequests}),{users:0,readings:0,dailyEntries:0,aiRequests:0}),feedback:{open:feedback.find(row=>row.status==='open')?._count._all??0,inProgress:feedback.find(row=>row.status==='in_progress')?._count._all??0,resolved:feedback.find(row=>row.status==='resolved')?._count._all??0}};
+  return {days,startDate,endDate,series,readingKinds:[...kindCounts].map(([kind,count])=>({kind,count})),totals:series.reduce((sum,row)=>({users:sum.users+row.users,readings:sum.readings+row.readings,dailyEntries:sum.dailyEntries+row.dailyEntries,aiRequests:sum.aiRequests+row.aiRequests}),{users:0,readings:0,dailyEntries:0,aiRequests:0}),feedback:{open:feedback.find(row=>row.status==='open')?._count._all??0,inProgress:feedback.find(row=>row.status==='in_progress')?._count._all??0,resolved:feedback.find(row=>row.status==='resolved')?._count._all??0}};
  }
  async content(page:{cursor?:string;limit:number;kind?:'announcement'|'guide'}){
   const where=page.kind?{kind:page.kind}:{};

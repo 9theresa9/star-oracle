@@ -79,6 +79,9 @@ test('saved explorations, private calendar, actions, reviews and export survive 
  const question='我如何把这次领悟转化成一个可以尝试的小行动？';
  const note='记得先做一件很小的事。';
  const journal='今天先放慢脚步，再看见自己真正想做的事。';
+ const getCounts=new Map<string,number>();
+ page.on('request',request=>{if(request.method()==='GET'){const path=new URL(request.url()).pathname;getCounts.set(path,(getCounts.get(path)??0)+1);}});
+ const gets=(path:string)=>getCounts.get(path)??0;
 
  await page.goto('/account');
  await page.getByRole('button',{name:'创建新账户',exact:true}).click();
@@ -156,6 +159,7 @@ test('saved explorations, private calendar, actions, reviews and export survive 
  await page.getByRole('button',{name:'☆ 收藏',exact:true}).click();
  await page.locator('.record-metadata').getByLabel('标签',{exact:true}).fill('成长、行动');
  await page.getByLabel('私人备注',{exact:true}).fill(note);
+ const historyGetsBefore=gets('/api/v1/readings');
  const metadataSave=write(page,'/api/v1/readings/'+reading.id+'/metadata','PATCH');
  await page.getByRole('button',{name:'保存记号',exact:true}).click();
  const metadata=await succeeded(await metadataSave);
@@ -163,6 +167,19 @@ test('saved explorations, private calendar, actions, reviews and export survive 
  expect(metadata.tags).toEqual(['成长','行动']);
  expect(metadata.note).toBe(note);
  await expect(page.getByRole('status').filter({hasText:'收藏、标签与备注已保存'})).toBeVisible();
+ expect(gets('/api/v1/readings'),'未筛选的 metadata 保存应更新已载入缓存，不重读分页').toBe(historyGetsBefore);
+ const beforeSharing=gets('/api/v1/readings');
+ page.once('dialog',dialog=>dialog.accept());
+ const sharing=write(page,'/api/v1/readings/'+reading.id+'/sharing','PATCH');
+ await page.getByRole('button',{name:'共享给管理员',exact:true}).click();
+ expect((await succeeded(await sharing)).shared).toBe(true);
+ await expect(page.getByRole('button',{name:'停止管理员共享',exact:true})).toBeVisible();
+ expect(gets('/api/v1/readings'),'共享开关不应重读分页').toBe(beforeSharing);
+ const unsharing=write(page,'/api/v1/readings/'+reading.id+'/sharing','PATCH');
+ await page.getByRole('button',{name:'停止管理员共享',exact:true}).click();
+ expect((await succeeded(await unsharing)).shared).toBe(false);
+ await expect(page.getByRole('button',{name:'共享给管理员',exact:true})).toBeVisible();
+ expect(gets('/api/v1/readings')).toBe(beforeSharing);
 
  await page.reload();
  await page.locator('.history-toggle').filter({hasText:question}).click();
@@ -180,6 +197,13 @@ test('saved explorations, private calendar, actions, reviews and export survive 
  expect((await search).status()).toBe(200);
  await expect(page.locator('.history-toggle').filter({hasText:question})).toBeVisible();
  await page.locator('.history-toggle').filter({hasText:question}).click();
+ const filteredGetsBefore=gets('/api/v1/readings');
+ await page.getByLabel('私人备注',{exact:true}).fill(note+' ');
+ const filteredSaving=write(page,'/api/v1/readings/'+reading.id+'/metadata','PATCH');
+ await page.getByRole('button',{name:'保存记号',exact:true}).click();
+ expect((await succeeded(await filteredSaving)).note).toBe(note);
+ await expect.poll(()=>gets('/api/v1/readings'),'筛选条件可能受 metadata 影响，必须重新读取服务器结果').toBeGreaterThan(filteredGetsBefore);
+ await expect(page.getByLabel('私人备注',{exact:true})).toHaveValue(note);
  await fits(page);
  await capture(page,info,'history');
 
@@ -206,12 +230,14 @@ test('saved explorations, private calendar, actions, reviews and export survive 
  await expect(actionRow).toBeVisible();
  await actionRow.getByRole('button',{name:'编辑',exact:true}).click();
  await page.getByLabel('想做的一件小事',{exact:true}).fill(editedTitle);
+ const actionsGetsBefore=gets('/api/v1/actions');
  const editing=write(page,'/api/v1/actions/'+action.id,'PATCH');
  await page.getByRole('button',{name:'保存修改',exact:true}).click();
  expect((await succeeded(await editing)).title).toBe(editedTitle);
  await expect(page.getByLabel('想做的一件小事',{exact:true})).toHaveValue('');
  actionRow=page.locator('.action-item').filter({has:page.getByRole('heading',{name:editedTitle,exact:true})});
  await expect(actionRow).toBeVisible();
+ expect(gets('/api/v1/actions'),'同完成状态下编辑标题不应重新读取行动分页').toBe(actionsGetsBefore);
  page.once('dialog',dialog=>dialog.accept());
  const deletion=write(page,'/api/v1/actions/'+action.id,'DELETE');
  await actionRow.getByRole('button',{name:'删除',exact:true}).click();

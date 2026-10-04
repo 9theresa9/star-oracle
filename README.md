@@ -44,3 +44,7 @@
 运行 `npm run typecheck`、`npm run build`、`npm test` 与 `npm run test:e2e`。集成测试需要真实MySQL与Redis；GitHub Actions提供这些服务，并记录完整提交SHA。浏览器验证涵盖桌面Chromium、iPhone WebKit和320px窄屏。
 
 验证结论以对应提交成功的CI及 [Review记录](docs/REVIEW.md) 为准；SMTP投递、模型计费、域名TLS、国内可达性与服务器容量另做上线验收。安全措施需要持续维护，不承诺绝对无漏洞。
+
+## 性能与维护
+
+页面按需加载、数据库查询与缓存优化，以及相同环境的前后对比方法，见 [性能说明](docs/PERFORMANCE.md)。CI 保存构建体积、真实查询/解密计数与功能回归报告；全部开发继续在当前完整功能分支和 PR #4。

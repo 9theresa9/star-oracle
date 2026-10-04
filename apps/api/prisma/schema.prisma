@@ -32,6 +32,7 @@ model User {
   reviewReports ReviewReport[]
   creditLedger CreditLedger[]
   @@map("user")
+  @@index([createdAt])
 }
 model Session {
   id String @id @db.VarChar(36)
@@ -112,6 +113,7 @@ model Reading {
   @@index([userId,createdAt])
   @@index([shared,createdAt])
   @@map("reading")
+  @@index([createdAt,kind])
 }
 model DailyEntry {
   id String @id @db.VarChar(36)
@@ -127,6 +129,7 @@ model DailyEntry {
   @@unique([userId,date])
   @@index([userId,createdAt])
   @@map("daily_entry")
+  @@index([date])
 }
 model AuditLog {
   id String @id @db.VarChar(36)
@@ -201,6 +204,7 @@ model ActionPlan {
   @@index([userId,createdAt])
   @@index([userId,dueDate])
   @@map("action_plan")
+  @@index([userId,completedAt])
 }
 model Feedback {
   id String @id @db.VarChar(36)
@@ -286,6 +290,7 @@ model Redemption {
   createdAt DateTime @default(now())
   @@unique([userId,codeId])
   @@map("redemption")
+  @@index([userId,createdAt])
 }
 model CreditLedger {
   id String @id @db.VarChar(36)

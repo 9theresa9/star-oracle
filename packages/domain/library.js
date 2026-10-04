@@ -706,8 +706,8 @@ const CARD_GUIDES = {
     "element": "土"
   }
 };
-export const TAROT_LIBRARY = Object.freeze(TAROT_DECK.map(card => Object.freeze({ ...card,
-  upright: Object.freeze([...card.upright]), reversed: Object.freeze([...card.reversed]), ...CARD_GUIDES[card.id] })));
+export const TAROT_LIBRARY = /* @__PURE__ */ (()=>Object.freeze(TAROT_DECK.map(card => Object.freeze({ ...card,
+  upright: Object.freeze([...card.upright]), reversed: Object.freeze([...card.reversed]), ...CARD_GUIDES[card.id] }))))();
 
 const HEXAGRAM_DESCRIPTIONS = [
   "主动创造需要节律与自律；先辨别什么值得持续投入，再确定行动的分寸。",
@@ -775,14 +775,14 @@ const HEXAGRAM_DESCRIPTIONS = [
   "看似完成仍需维护。观察哪些细节可能反复，安排交接与检查。",
   "尚未完成并不自动等于失败。校准次序、条件与节奏，再继续下一段。"
 ];
-export const HEXAGRAM_LIBRARY = Object.freeze(Array.from({ length: 64 }, (_, i) => {
+export const HEXAGRAM_LIBRARY = /* @__PURE__ */ (()=>Object.freeze(Array.from({ length: 64 }, (_, i) => {
   const hexagram = getHexagram(KING_WEN_BY_MASK.indexOf(i + 1));
   return Object.freeze({ ...hexagram, description: HEXAGRAM_DESCRIPTIONS[i],
     guidance: '结合实际处境写下回应：' + hexagram.prompt,
     keywords: Object.freeze([hexagram.theme, hexagram.lower.image, hexagram.upper.image]) });
-}));
+})))();
 
-export const TUTORIALS = Object.freeze([
+export const TUTORIALS = /* @__PURE__ */ (()=>Object.freeze([
   {
     "id": "tarot-first",
     "title": "第一次抽塔罗",
@@ -903,4 +903,4 @@ export const TUTORIALS = Object.freeze([
       "同一个问题先实践和收集信息，再决定是否需要新的角度。"
     ]
   }
-].map(tutorial => Object.freeze({ ...tutorial, steps: Object.freeze(tutorial.steps) })));
+].map(tutorial => Object.freeze({ ...tutorial, steps: Object.freeze(tutorial.steps) }))))();
