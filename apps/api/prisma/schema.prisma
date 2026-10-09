@@ -8,6 +8,7 @@ datasource db {
 model User {
   id String @id @db.VarChar(36)
   name String @db.VarChar(100)
+  username String? @unique @db.VarChar(32)
   email String @unique @db.VarChar(191)
   emailVerified Boolean @default(false)
   image String? @db.Text

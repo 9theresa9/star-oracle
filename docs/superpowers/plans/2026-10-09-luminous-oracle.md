@@ -1,3 +1,5 @@
+> Authentication requirements below were superseded by the owner's subsequent controlled-username request. See `2026-10-09-precreated-accounts-design.md` and `docs/ACCOUNTS.md`; SMTP is no longer a runtime requirement.
+
 # Luminous Oracle Implementation Plan
 
 > **For agentic workers:** Use superpowers:executing-plans to implement task-by-task; narrowly independent backend/infrastructure work may be delegated to workers. Integration remains with one owner.

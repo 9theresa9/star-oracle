@@ -97,14 +97,14 @@ candidate=(docker compose --project-name "$project" --env-file "$ENV_FILE" \
 ## 日常监控
 
 - `/api/v1/health`：DB 与 Redis 可用性。外部监控只保存状态，不记录私密响应。
-- 证书有效期、磁盘/卷容量、MySQL 连接数、Redis 内存/驱逐、API 错误率/延迟、AI 日预算、SMTP 退信。MySQL 慢查询/通用查询日志可能含正文或 token；默认不启用，必要时先审查脱敏及保留策略。
+- 证书有效期、磁盘/卷容量、MySQL 连接数、Redis 内存/驱逐、API 错误率/延迟、AI 日预算。MySQL 慢查询/通用查询日志可能含正文或 token；默认不启用，必要时先审查脱敏及保留策略。
 - Redis 短期认证数据不应被任意驱逐；设置足够内存，采用拒绝写入策略并由服务返回暂不可用。生产正式容量配置以压测为准。
 - 模型供应商侧设置独立付费额度；本站请求预算不是 token 或金额账本。
 - 记录部署的镜像 digest、源提交、迁移版本；持续追踪 Node、MySQL、Redis、Caddy、Nginx 和 npm 依赖公告。
-- 不在公网开放 phpMyAdmin/Adminer、Redis UI、SMTP 调试界面。开发 Mailpit 仅本机。
+- 不在公网开放 phpMyAdmin/Adminer、Redis UI或其它管理调试界面。
 
 ## 安全事件
 
-撤销涉及账户 session，轮换已泄漏的认证/模型/SMTP 凭据；隔离流量、保留无正文审计和相关运维证据。涉及数据加密密钥时先确定备份与迁移方案，不能仅改环境变量造成全部旧数据无法解密。随后验证跨用户访问与权限失效，并记录用户影响与处置结果。
+撤销涉及账户 session，轮换已泄漏的认证/模型凭据；隔离流量、保留无正文审计和相关运维证据。涉及数据加密密钥时先确定备份与迁移方案，不能仅改环境变量造成全部旧数据无法解密。随后验证跨用户访问与权限失效，并记录用户影响与处置结果。
 
 网关的 runtime proxy error 也可能携带完整 request；`infra/Caddyfile` 对默认 logger 使用 filter 删除整个 request 对象，保留错误类别/status。CI 在无网络的独立 Caddy 容器内产生虚拟 token 的 502 请求并断言日志不包含 token；这不会申请 TLS 或公开服务。配置依据：[Caddy 全局日志](https://caddyserver.com/docs/caddyfile/options#log)与[字段过滤](https://caddyserver.com/docs/caddyfile/directives/log#filter)。

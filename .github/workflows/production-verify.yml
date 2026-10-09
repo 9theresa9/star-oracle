@@ -25,9 +25,6 @@ jobs:
         options: >-
           --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pintegration-root-password"
           --health-interval=10s --health-timeout=5s --health-retries=15
-      mailpit:
-        image: axllent/mailpit:v1.31.3
-        ports: ['1025:1025', '8025:8025']
       redis:
         image: redis:7.4
         ports: ['6379:6379']
@@ -41,7 +38,6 @@ jobs:
       REDIS_URL: redis://127.0.0.1:6379
       AUTH_SECRET: integration-test-secret-12345678901234567890
       DATA_ENCRYPTION_KEY: 1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef
-      REQUIRE_EMAIL_VERIFICATION: 'false'
       ADMIN_REQUIRE_2FA: 'false'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -73,7 +69,6 @@ jobs:
           NODE_EXTRA_CA_CERTS: /tmp/star-oracle-tls/cert.pem
           MOCK_TLS_CERT: /tmp/star-oracle-tls/cert.pem
           MOCK_TLS_KEY: /tmp/star-oracle-tls/key.pem
-          MAILPIT_URL: http://127.0.0.1:8025
       - name: Checkout fixed performance baseline
         if: github.event_name == 'push'
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262

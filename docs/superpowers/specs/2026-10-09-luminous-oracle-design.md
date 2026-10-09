@@ -1,3 +1,5 @@
+> Authentication requirements below were superseded by the owner's subsequent controlled-username request. See `2026-10-09-precreated-accounts-design.md` and `docs/ACCOUNTS.md`; SMTP is no longer a runtime requirement.
+
 # 照见：清透观星体验与可靠性修订
 
 ## Goal and authorization

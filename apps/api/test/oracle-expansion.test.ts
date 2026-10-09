@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { db,redis,seal,open,chinaDate,connectRedis } from '../src/infrastructure.js';
 import { SPREADS,SCENARIOS,castNumberLines,castTimeLines,drawTarot,evidenceFor,type Reading } from '@star-oracle/domain';
 import { requestModel } from '../src/model.service.js';
+import { provisionAccount } from '../src/maintenance/account-service.js';
 let child:ChildProcess,model:HTTPSServer,providerCalls=0;
 const base='http://127.0.0.1:3113',origin='http://localhost:5173';
 const createdUsers:string[]=[];
@@ -22,12 +23,14 @@ const providerInputs:{question:string;evidence:{reference:string}[];context?:str
 async function request(path:string,{cookie='',method='GET',body}:{cookie?:string;method?:string;body?:unknown}={}){
  return fetch(base+path,{method,headers:{'Content-Type':'application/json',Origin:origin,...(cookie?{Cookie:cookie}:{})},...(body!==undefined?{body:JSON.stringify(body)}:{})});
 }
-async function register(label:string){
- const email=label+'-'+randomUUID()+'@example.com';
- const response=await request('/api/auth/sign-up/email',{method:'POST',body:{name:label,email,password:'oracle-expansion-strong-password-123'}});
+async function precreatedAccount(label:string){
+ const username=label.toLowerCase().replace(/[^a-z0-9]/g,'_').slice(0,15)+'_'+randomUUID().replaceAll('-','').slice(0,16);
+ const user=await provisionAccount(db,{name:label,username,password:'oracle-expansion-strong-password-123'});
+ createdUsers.push(user.id);
+ const response=await request('/api/auth/sign-in/username',{method:'POST',body:{username,password:'oracle-expansion-strong-password-123'}});
  assert.equal(response.status,200);
  const data=await response.json(),cookie=response.headers.getSetCookie().map(value=>value.split(';')[0]).join('; ');
- createdUsers.push(data.user.id);return {id:data.user.id as string,cookie};
+ assert.equal(data.user.id,user.id);assert.ok(cookie);return {id:user.id,cookie};
 }
 async function draw(cookie:string,overrides:Record<string,unknown>={}){
  const response=await request('/api/v1/readings',{cookie,method:'POST',body:{kind:'tarot',question:'我可以怎样整理自己的选择？',spread:'three',allowReversed:true,requestId:randomUUID(),...overrides}});
@@ -64,7 +67,7 @@ after(async()=>{
  await db.$disconnect();redis.disconnect();
 });
 test('expanded casts preserve legacy requests and canonical server results',async()=>{
- const owner=await register('cast-owner');
+ const owner=await precreatedAccount('cast-owner');
  const catalog=await request('/api/v1/oracle/catalog').then(r=>r.json());
  assert.equal(Object.keys(catalog.spreads).length,32);assert.equal(Object.keys(catalog.scenarios).length,15);
  assert.equal(Object.keys(SPREADS).length,32);assert.equal(Object.keys(SCENARIOS).length,15);
@@ -87,7 +90,7 @@ test('expanded casts preserve legacy requests and canonical server results',asyn
  assert.equal((await request('/api/v1/readings',{cookie:owner.cookie,method:'POST',body:{...tarotInput,allowReversed:true}})).status,409);
 });
 test('private metadata, optimistic updates and bounded encrypted search keep every continuation',async()=>{
- const owner=await register('search-owner'),other=await register('search-other');
+ const owner=await precreatedAccount('search-owner'),other=await precreatedAccount('search-other');
  const record=await draw(owner.cookie);
  const input={favorite:true,tags:['工作','PRIVATE-TAG'],note:'PRIVATE-ANNOTATION-SEARCH',version:0};
  assert.equal((await request('/api/v1/readings/'+record.id+'/metadata',{cookie:other.cookie,method:'PATCH',body:input})).status,404);
@@ -106,7 +109,7 @@ test('private metadata, optimistic updates and bounded encrypted search keep eve
  await db.reading.create({data:{id:dateId,userId:owner.id,kind:'tarot',payload:{...dated,question:''},question:seal(dated.question,'question:'+owner.id+':'+dateId),requestId:randomUUID(),createdAt:new Date(timestamp)}});
  const day=await request('/api/v1/readings?dateFrom=2026-03-02&dateTo=2026-03-02',{cookie:owner.cookie}).then(r=>r.json());
  assert.deepEqual(day.items.map((x:{id:string})=>x.id),[dateId]);
- const pageOwner=await register('continuation-owner'),rows=[];
+ const pageOwner=await precreatedAccount('continuation-owner'),rows=[];
  const oldest=Date.now()-1000000;
  for(let i=0;i<606;i++){
   const id=randomUUID(),question=i===0?'UNIQUE-LATE-MATCH':'其他较新的记录';
@@ -123,7 +126,7 @@ test('private metadata, optimistic updates and bounded encrypted search keep eve
  assert.equal((await request('/api/v1/daily/'+daily.id,{cookie:other.cookie})).status,404);
 });
 test('follow-up AI remains on the owned cast, is idempotent, encrypted and budgeted atomically',{skip:!process.env.MOCK_TLS_CERT},async()=>{
- const owner=await register('follow-up-owner'),other=await register('follow-up-other'),record=await draw(owner.cookie);
+ const owner=await precreatedAccount('follow-up-owner'),other=await precreatedAccount('follow-up-other'),record=await draw(owner.cookie);
  const initialRequestId=randomUUID();
  const initial=await request('/api/v1/readings/'+record.id+'/interpret',{cookie:owner.cookie,method:'POST',body:{consent:true,requestId:initialRequestId}});
  assert.equal(initial.status,200);assert.equal((await initial.json()).ai,true);
@@ -208,7 +211,7 @@ test('follow-up AI remains on the owned cast, is idempotent, encrypted and budge
 });
 
 test('completed follow-up cache restores pending/failed projections without another provider call or credit debit',{skip:!process.env.MOCK_TLS_CERT},async()=>{
- const owner=await register('follow-up-recovery'),record=await draw(owner.cookie);
+ const owner=await precreatedAccount('follow-up-recovery'),record=await draw(owner.cookie);
  await db.membership.upsert({where:{userId:owner.id},create:{userId:owner.id,credits:3},update:{credits:3}});
  await db.userAIUsage.upsert({where:{userId_date:{userId:owner.id,date:chinaDate()}},create:{id:randomUUID(),userId:owner.id,date:chinaDate(),requests:5},update:{requests:5}});
  const input={prompt:'这次结果里最值得先实践的一步是什么？',consent:true,requestId:randomUUID()};

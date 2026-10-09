@@ -5,7 +5,7 @@ import express from 'express';
 import helmet from 'helmet';
 import { randomUUID,createHmac } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { toNodeHandler } from 'better-auth/node';
+import { toNodeHandler,fromNodeHeaders } from 'better-auth/node';
 import { auth } from './auth.js';
 import { config } from './config.js';
 import { db,redis,consumeLimit,connectRedis } from './infrastructure.js';
@@ -46,7 +46,19 @@ export async function createApp() {
  });
  const authHandler=toNodeHandler(auth);
  server.all('/api/auth/*splat',async(req,res,next)=>{
-  if(req.headers['x-expected-actor']||req.headers['x-expected-session']){
+  const path=req.path.slice('/api/auth'.length);
+  const allowed=req.method==='GET'?path==='/get-session':req.method==='POST'&&[
+   '/sign-in/username','/sign-out','/delete-user','/two-factor/enable','/two-factor/disable',
+   '/two-factor/verify-totp','/two-factor/verify-backup-code',
+  ].includes(path);
+  if(!allowed){res.status(404).json({message:'此账户入口未开放'});return;}
+  // A cached Better Auth session is not proof of a live, provisioned DB session.
+  // TOTP supports both anonymous login challenges and authenticated enrollment.
+  let mustResolve=!!(req.headers['x-expected-actor']||req.headers['x-expected-session'])||['/delete-user','/two-factor/enable','/two-factor/disable'].includes(path);
+  if(!mustResolve&&['/get-session','/two-factor/verify-totp','/two-factor/verify-backup-code'].includes(path)){
+   try{mustResolve=!!await auth.api.getSession({headers:fromNodeHeaders(req.headers)});}catch{res.status(503).json({message:'账户确认暂时不可用'});return;}
+  }
+  if(mustResolve){
    try{await resolveActor(req);}catch(error){
     const status=error instanceof HttpException?error.getStatus():503;
     const detail=error instanceof HttpException?error.getResponse():null;

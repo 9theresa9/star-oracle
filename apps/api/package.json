@@ -11,7 +11,8 @@
     "test": "node --import tsx --test --test-concurrency=1 test/*.test.ts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",
-    "admin:promote": "node dist/maintenance/promote-admin.js"
+    "admin:promote": "node dist/maintenance/promote-admin.js",
+    "account:manage": "node dist/maintenance/account-cli.js"
   },
   "dependencies": {
     "@star-oracle/domain": "2.0.0",
@@ -25,14 +26,12 @@
     "express": "5.1.0",
     "helmet": "8.1.0",
     "ioredis": "5.8.2",
-    "nodemailer": "10.0.13",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2",
     "zod": "3.25.76",
     "prisma": "6.19.0"
   },
   "devDependencies": {
-    "@types/express": "5.0.5",
-    "@types/nodemailer": "7.0.3"
+    "@types/express": "5.0.5"
   }
 }

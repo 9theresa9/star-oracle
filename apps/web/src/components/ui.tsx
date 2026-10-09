@@ -6,7 +6,7 @@ export function Button({children,busy=false,...props}:React.ButtonHTMLAttributes
 }
 export function Notice({error}:{error:unknown}) {return error?<p className="notice" role="alert">{error instanceof Error?error.message:String(error)}</p>:null;}
 export function Empty({title,children}:{title:string;children:ReactNode}) {return <div className="empty"><span className="eyebrow">A LITTLE SPACE</span><h2>{title}</h2><p>{children}</p></div>;}
-export function LoginPrompt(){return <Empty title="为你的故事，留一个位置">登录后即可同步占卜记录和私人日记。<br/><Link className="button" to="/account">创建账户或登录 <ArrowUpRight size={16}/></Link></Empty>;}
+export function LoginPrompt(){return <Empty title="为你的故事，留一个位置">登录后即可同步占卜记录和私人日记。<br/><Link className="button" to="/account">使用预先创建的账户登录 <ArrowUpRight size={16}/></Link></Empty>;}
 export function CopyButton({text}:{text:string}){
  const [done,setDone]=useState(false),[error,setError]=useState(false);
  const timer=useRef<ReturnType<typeof setTimeout>|null>(null),mounted=useRef(false);

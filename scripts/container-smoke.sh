@@ -81,9 +81,9 @@ try{
 JS
 age-keygen -o /tmp/star-oracle-age-identity >/dev/null 2>&1
 export AGE_RECIPIENT="$(age-keygen -y /tmp/star-oracle-age-identity)"
-# Make the backup one additive migration older, exclusively in this disposable
+# Make the backup two additive migrations older, exclusively in this disposable
 # synthetic CI project. This proves restore imports old history into a clean DB.
-docker compose --env-file .env.production exec -T mysql sh -c 'MYSQL_PWD="$MYSQL_MIGRATION_PASSWORD" exec mysql -uoracle_migrator star_oracle -e "ALTER TABLE reading_conversation DROP COLUMN inputCipher; DELETE FROM _prisma_migrations WHERE migration_name = '\''202610090001_follow_up_recovery'\'';"'
+docker compose --env-file .env.production exec -T mysql sh -c 'MYSQL_PWD="$MYSQL_MIGRATION_PASSWORD" exec mysql -uoracle_migrator star_oracle -e "ALTER TABLE reading_conversation DROP COLUMN inputCipher; ALTER TABLE user DROP COLUMN username; DELETE FROM _prisma_migrations WHERE migration_name IN ('\''202610090001_follow_up_recovery'\'','\''202610090002_precreated_usernames'\'');"'
 bash scripts/backup.sh
 docker compose --env-file .env.production run --rm --no-deps migrate
 docker compose --env-file .env.production exec -T mysql sh -c 'MYSQL_PWD="$MYSQL_MIGRATION_PASSWORD" exec mysql -uoracle_migrator star_oracle -e "CREATE TABLE post_backup_only (id INT PRIMARY KEY); INSERT INTO post_backup_only VALUES (1);"'
@@ -109,6 +109,8 @@ try{
  if(open(row.question,'question:'+row.userId+':'+id)!=='恢复演练的私人问题')throw new Error('Private restore round trip failed');
  const leftovers=await db.$queryRawUnsafe("SELECT COUNT(*) AS total FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='post_backup_only'");if(Number(leftovers[0].total)!==0)throw new Error('Restore retained a post-backup table');
  const migrated=await db.$queryRawUnsafe("SELECT COUNT(*) AS total FROM _prisma_migrations WHERE migration_name='202610090001_follow_up_recovery' AND finished_at IS NOT NULL");if(Number(migrated[0].total)!==1)throw new Error('Old backup was not migrated cleanly');
+ const legacy=await db.user.findUniqueOrThrow({where:{id:'restore-test-user'}});if(legacy.username!==null||!legacy.emailVerified||legacy.role!=='user')throw new Error('Username migration must not invent identities or alter legacy state');
+ const usernames=await db.$queryRawUnsafe("SELECT COUNT(*) AS total FROM _prisma_migrations WHERE migration_name='202610090002_precreated_usernames' AND finished_at IS NOT NULL");if(Number(usernames[0].total)!==1)throw new Error('Legacy username migration was not applied');
  const sessions=await db.session.count();if(sessions!==0)throw new Error('Restored sessions must be revoked');
 }finally{await db.$disconnect();redis.disconnect();}
 JS

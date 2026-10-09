@@ -2,16 +2,12 @@ import { test,expect,type Page } from './fixtures';
 import { PrismaClient } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { runInNewContext } from 'node:vm';
+import {provisionBrowserAccount} from './fixtures/accounts';
 
-async function register(page:Page,email:string,name:string){
+async function signInFixture(page:Page,username:string,name:string){
+ await provisionBrowserAccount(username,name,'management-fixture-password-123');
  await page.goto('/account');
- await page.getByRole('button',{name:'创建新账户',exact:true}).click();
- await page.getByLabel('怎么称呼你').fill(name);
- await page.getByLabel('邮箱',{exact:true}).fill(email);
- await page.getByLabel('密码',{exact:true}).fill('management-fixture-password-123');
- await page.getByRole('button',{name:'创建账户',exact:true}).click();
- await expect(page.getByRole('button',{name:'登录',exact:true})).toBeVisible();
- await page.getByLabel('邮箱',{exact:true}).fill(email);
+ await page.getByLabel('用户名',{exact:true}).fill(username);
  await page.getByLabel('密码',{exact:true}).fill('management-fixture-password-123');
  await page.getByRole('button',{name:'登录',exact:true}).click();
  await expect(page.locator('.daily-letter')).toBeVisible();
@@ -21,14 +17,14 @@ test('management publishing, feedback, redemption and membership use real isolat
  test.skip(info.project.name==='small-chromium','Complete management flows run on desktop and iPhone.');
  test.setTimeout(120000);
  // Promotion is a disposable database fixture operation, never a production shortcut.
- if(process.env.NODE_ENV!=='test'||!process.env.DATABASE_URL||!['localhost','127.0.0.1','::1'].includes(new URL(process.env.DATABASE_URL).hostname))throw new Error('Management fixtures require the isolated local test database.');
- const origin=baseURL??'http://localhost:5173',token=randomUUID().replaceAll('-',''),emails=['member-'+token+'@example.com','operator-'+token+'@example.com'];
+ if(process.env.NODE_ENV!=='test'||!process.env.DATABASE_URL||!['localhost','127.0.0.1','[::1]'].includes(new URL(process.env.DATABASE_URL).hostname))throw new Error('Management fixtures require the isolated local test database.');
+ const origin=baseURL??'http://localhost:5173',token=randomUUID().replaceAll('-',''),usernames=['synthetic-member-'+token.slice(0,12),'synthetic-operator-'+token.slice(0,12)];
  const device={viewport:info.project.use.viewport,isMobile:info.project.use.isMobile,hasTouch:info.project.use.hasTouch,deviceScaleFactor:info.project.use.deviceScaleFactor,userAgent:info.project.use.userAgent};
  const memberContext=await browser.newContext({baseURL:origin,...device}),operatorContext=await browser.newContext({baseURL:origin,...device}),guestContext=await browser.newContext({baseURL:origin,...device});
  async function fitsViewport(page:Page){expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(await page.evaluate(()=>window.innerWidth));}
  const member=await memberContext.newPage(),operator=await operatorContext.newPage(),guest=await guestContext.newPage(),db=new PrismaClient(),codeIds:string[]=[],contentIds:string[]=[];
  try{
-  await register(member,emails[0]!, '管理流程用户');
+  await signInFixture(member,usernames[0]!, '管理流程用户');
   if(device.viewport)expect(await member.evaluate(()=>window.innerWidth)).toBe(device.viewport.width);
   await fitsViewport(member);
   await member.goto('/feedback');
@@ -44,8 +40,8 @@ test('management publishing, feedback, redemption and membership use real isolat
   expect((await memberContext.request.get('/api/v1/admin/overview')).status()).toBe(403);
   expect((await guestContext.request.get('/api/v1/feedback')).status()).toBe(401);
 
-  await register(operator,emails[1]!, '管理流程管理员');
-  const fixture=await db.user.findUniqueOrThrow({where:{email:emails[1]!},select:{id:true}});
+  await signInFixture(operator,usernames[1]!, '管理流程管理员');
+  const fixture=await db.user.findUniqueOrThrow({where:{username:usernames[1]!},select:{id:true}});
   await db.user.update({where:{id:fixture.id},data:{role:'admin'}});
   await operator.goto('/admin');
   await expect(operator.getByRole('heading',{name:'照看系统，也照看信任。'})).toBeVisible();
@@ -164,13 +160,13 @@ test('management publishing, feedback, redemption and membership use real isolat
   expect(after).toMatchObject({tier:'plus',credits:7});
 
   await operator.getByRole('button',{name:'用户与会员',exact:true}).click();
-  const userRow=operator.getByRole('row').filter({hasText:emails[0]!});
+  const userRow=operator.getByRole('row').filter({hasText:'管理流程用户'});
   await userRow.getByRole('button',{name:'设置权益',exact:true}).click();
   await operator.getByLabel('新的会员类型').selectOption('free');
   // Empty credits input must preserve the existing seven credits.
   await expect(operator.getByLabel('额外额度余额（可选）')).toHaveValue('');
   operator.once('dialog',dialog=>void dialog.accept());
-  const memberUser=await db.user.findUniqueOrThrow({where:{email:emails[0]!},select:{id:true}});
+  const memberUser=await db.user.findUniqueOrThrow({where:{username:usernames[0]!},select:{id:true}});
   const adjusted=operator.waitForResponse(r=>r.url().endsWith('/api/v1/admin/users/'+memberUser.id+'/membership')&&r.request().method()==='PATCH');
   await operator.getByRole('button',{name:'保存权益',exact:true}).click();
   expect((await adjusted).status()).toBe(200);
@@ -183,7 +179,7 @@ test('management publishing, feedback, redemption and membership use real isolat
   await operator.screenshot({path:'test-results/management-'+info.project.name+'.png',fullPage:true,animations:'disabled'});
  }finally{
   await Promise.all([memberContext.close(),operatorContext.close(),guestContext.close()]);
-  await db.user.deleteMany({where:{email:{in:emails}}});
+  await db.user.deleteMany({where:{username:{in:usernames}}});
   if(codeIds.length)await db.redeemCode.deleteMany({where:{id:{in:codeIds}}});
   if(contentIds.length)await db.siteContent.deleteMany({where:{id:{in:contentIds}}});
   await db.$disconnect();

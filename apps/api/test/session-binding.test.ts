@@ -8,7 +8,7 @@ after(async()=>db.$disconnect());
 test('guard rejects stale page actor or session before a private handler can run',async(t)=>{
  const original=auth.api.getSession;auth.api.getSession=async()=>({user:{id:'B'},session:{id:'session-B'}}) as any;t.after(()=>{auth.api.getSession=original;});
  const originalUser=db.user.findUnique,originalSession=db.session.findUnique;
- db.user.findUnique=(async()=>({id:'B',name:'B',email:'b@example.test',role:'user',disabled:false,twoFactorEnabled:false})) as any;
+ db.user.findUnique=(async()=>({id:'B',name:'B',username:'synthetic-b',email:'b@example.test',role:'user',disabled:false,twoFactorEnabled:false})) as any;
  db.session.findUnique=(async()=>({id:'session-B',expiresAt:new Date(Date.now()+60_000)})) as any;
  t.after(()=>{db.user.findUnique=originalUser;db.session.findUnique=originalSession;});
  const binding=createHmac('sha256',process.env.AUTH_SECRET!).update('browser-session:session-B').digest('hex');

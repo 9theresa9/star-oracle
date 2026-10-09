@@ -1,4 +1,6 @@
 import { test,expect } from './fixtures';
+import {randomUUID} from 'node:crypto';
+import {provisionBrowserAccount} from './fixtures/accounts';
 test('home, guest tarot and six-line ritual fit the viewport',async({page},info)=>{
  await page.goto('/');
  await expect(page.getByRole('heading',{name:/抬头看星.*回身看见自己/})).toBeVisible();
@@ -25,16 +27,10 @@ test('home, guest tarot and six-line ritual fit the viewport',async({page},info)
  await page.screenshot({animations:'disabled',path:'test-results/iching-'+info.project.name+'.png',fullPage:true});
 });
 test('account, cloud daily and private journal work end to end',async({page},info)=>{
+ const username='synthetic-site-'+randomUUID().replaceAll('-','').slice(0,16);
+ await provisionBrowserAccount(username,'星空旅人','browser-test-password-123');
  await page.goto('/account');
- await page.getByRole('button',{name:'创建新账户'}).click();
- await page.getByLabel('怎么称呼你').fill('星空旅人');
- const email='browser-'+info.project.name+'-'+Date.now()+'@example.com';
- await page.getByLabel('邮箱',{exact:true}).fill(email);
- await page.getByLabel('密码',{exact:true}).fill('browser-test-password-123');
- await page.getByRole('button',{name:'创建账户',exact:true}).click();
- // Test environment disables email verification; sign in explicitly for consistent behavior.
- await expect(page.getByRole('button',{name:'登录',exact:true})).toBeVisible();
- await page.getByLabel('邮箱',{exact:true}).fill(email);
+ await page.getByLabel('用户名',{exact:true}).fill(username);
  await page.getByLabel('密码',{exact:true}).fill('browser-test-password-123');
  await page.getByRole('button',{name:'登录',exact:true}).click();
  await expect(page.locator('.daily-letter')).toBeVisible();
