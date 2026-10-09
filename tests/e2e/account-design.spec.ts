@@ -17,7 +17,7 @@ test('reset token is removed from address bar without removing reset capability'
 });
 test('daylight account, navigation and public feature pages remain usable',async({page},info)=>{
  for(const path of ['/','/account','/space','/library','/iching']){
-  await page.goto(path);await expect(page.locator('main h1, main h2').first()).toBeVisible();if(path==='/account')await expect(page.getByRole('button',{name:'登录',exact:true})).toBeVisible();
+  await page.goto(path);await expect(page.locator('main h1:visible, main h2:visible').first()).toBeVisible();if(path==='/account')await expect(page.getByRole('button',{name:'登录',exact:true})).toBeVisible();
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
   await page.screenshot({path:'test-results/luminous-'+(path==='/'?'home':path.slice(1))+'-'+info.project.name+'.png',fullPage:true,animations:'disabled'});
  }

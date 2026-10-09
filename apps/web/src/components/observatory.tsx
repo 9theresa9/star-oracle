@@ -1,7 +1,7 @@
 import './observatory.css';
 /** Original vector artwork: a daylight observatory, with no remote imagery or trackers. */
 export function Observatory({className=''}:{className?:string}){
- return <div className={'observatory '+className} aria-hidden="true"><svg viewBox="0 0 640 680" role="presentation">
+ return <div className={'observatory '+className} aria-hidden="true"><svg viewBox="0 0 640 680" preserveAspectRatio="xMidYMid slice" role="presentation">
   <defs><linearGradient id="oracle-sky" x2="0" y2="1"><stop stopColor="#d4e9f4"/><stop offset=".62" stopColor="#f6fbfd"/><stop offset="1" stopColor="#abcbdc"/></linearGradient><radialGradient id="oracle-moon"><stop stopColor="#fff"/><stop offset=".75" stopColor="#fdfefe"/><stop offset="1" stopColor="#e2edf1"/></radialGradient><linearGradient id="oracle-sea" x2="0" y2="1"><stop stopColor="#88b6cd" stopOpacity=".65"/><stop offset="1" stopColor="#d2e6ef" stopOpacity=".1"/></linearGradient></defs>
   <rect width="640" height="680" fill="url(#oracle-sky)"/><circle cx="372" cy="266" r="136" fill="url(#oracle-moon)"/>
   <g fill="none" stroke="#6b98ad" strokeWidth=".8" opacity=".6"><ellipse cx="326" cy="287" rx="237" ry="139" transform="rotate(-34 326 287)"/><ellipse cx="326" cy="287" rx="197" ry="225" transform="rotate(22 326 287)"/><circle cx="326" cy="287" r="207" strokeDasharray="2 9"/><path d="M84 287h480M326 58v456" opacity=".3"/></g>

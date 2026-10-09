@@ -125,6 +125,7 @@ jobs:
           CI_REVIEW_DETAIL: 'true'
           CI_VISUAL_REVIEW_DETAIL: 'true'
       - name: Validate production Docker builds and isolated stack
+        if: ${{ !cancelled() }}
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y age
