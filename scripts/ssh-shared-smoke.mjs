@@ -20,6 +20,34 @@ export function sharedSmokeFailureCode(error){
  const safe=new Error(/^SHARED_[A-Z_]{1,96}$/.test(code)?code:'SHARED_VERIFICATION_FAILED');
  safe.sharedStage=error?.sharedStage;return formatSharedFailure(safe);
 }
+const isolationProbes=Object.freeze({
+ edgeApi:['same-edge API peer must receive 403','SHARED_PROBE_EDGE_API'],
+ edgeWeb:['same-edge Web peer must receive 403','SHARED_PROBE_EDGE_WEB'],
+ edgeMysql:['edge peer cannot reach MySQL','SHARED_PROBE_EDGE_MYSQL'],
+ edgeRedis:['edge peer cannot reach Redis','SHARED_PROBE_EDGE_REDIS'],
+ crossApi:['cross-bridge peer cannot reach API','SHARED_PROBE_CROSS_API'],
+ crossWeb:['cross-bridge peer cannot reach Web','SHARED_PROBE_CROSS_WEB'],
+ webLoopback:['actual Web loopback control is reachable','SHARED_PROBE_WEB_LOOPBACK'],
+ webMysql:['actual Web cannot reach MySQL','SHARED_PROBE_WEB_MYSQL'],
+ webRedis:['actual Web cannot reach Redis','SHARED_PROBE_WEB_REDIS'],
+ appSelect:['app can read its own schema','SHARED_PROBE_APP_SELECT'],
+ appDdl:['app cannot create tables','SHARED_PROBE_APP_DDL'],
+ appRead:['app cannot read Journal','SHARED_PROBE_APP_READ'],
+ appWrite:['app cannot write Journal','SHARED_PROBE_APP_WRITE'],
+ appFile:['app cannot read server files','SHARED_PROBE_APP_FILE'],
+});
+export async function runSharedIsolationProbe(name,operation){
+ if(!Object.hasOwn(isolationProbes,name)||typeof operation!=='function')throw new Error('SHARED_PROBE_INVALID');
+ const [label,code]=isolationProbes[name];checkpoint(label);
+ try{return await operation();}catch{throw new Error(code);}
+}
+const privilegeSql=Object.freeze({appSelect:'SELECT id FROM user LIMIT 1',appDdl:'CREATE TABLE forbidden (id INT)',appRead:'SELECT * FROM fakejournal.entry',appWrite:"UPDATE fakejournal.entry SET body='tampered'",appFile:"SELECT LOAD_FILE('/etc/passwd')"});
+export function appPrivilegeProbeCode(name){
+ if(!Object.hasOwn(privilegeSql,name))throw new Error('SHARED_PROBE_INVALID');
+ const statement='const sql='+JSON.stringify(privilegeSql[name])+';';
+ const operation=name==='appSelect'?'await db.$queryRawUnsafe(sql);':"let denied=false;try{const rows=await db.$queryRawUnsafe(sql);if(sql.includes('LOAD_FILE')&&Object.values(rows[0])[0]===null)denied=true;}catch{denied=true;}if(!denied)throw new Error('Excess privileges');";
+ return "const {PrismaClient}=await import('@prisma/client');const db=new PrismaClient();try{"+statement+operation+"}finally{await db.$disconnect();}";
+}
 export function guardExternalLifecycle(run,id,name){
  return args=>{const mutation=args.some(a=>['start','stop','restart','rm','remove','kill','pause','unpause','rename','update','connect','disconnect'].includes(a));assert.ok(!(mutation&&args.some(a=>a===id||a===name)),'Shared smoke: launcher attempted external lifecycle mutation');return run(args);};
 }
@@ -109,12 +137,15 @@ export async function runSharedSmoke(proofPath){
   for(const origin of ['null','https://localhost:17777','http://127.0.0.1:17777'])assert.equal((await httpProbe(undefined,{Origin:origin})).status,403);
   for(const header of ['Forwarded','X-Forwarded-For','X-Forwarded-Host','X-Forwarded-Proto','X-Real-IP','X-Forwarded-Unrecognized'])for(const value of ['', '127.0.0.1'])assert.equal((await httpProbe(undefined,{[header]:value})).status,403);checks.add('authority-origin-forwarding');
   const externalIp=Object.values(networkInterfaces()).flat().find(n=>n?.family==='IPv4'&&!n.internal&&!n.address.startsWith('172.30.'))?.address;assert.ok(externalIp,'External host interface required');await assert.rejects(httpProbe(undefined,{},externalIp));await assert.rejects(httpProbe(undefined,{},'::1'));checks.add('actual-loopback-ipv4-ipv6');
-  checkpoint('actual peer and cross-bridge isolation');
-  const peerCode=`const assert=(await import('node:assert/strict')).default;const {get}=await import('node:http');for(const host of ['172.30.77.2:3001','172.30.77.3:8080']){const status=await new Promise((ok,reject)=>{const r=get('http://'+host+'/api/v1/health',{headers:{Host:'localhost:17777',Origin:'http://localhost:17777'},timeout:4000},s=>{s.resume();s.on('end',()=>ok(s.statusCode));});r.on('error',reject);r.on('timeout',()=>r.destroy(new Error('timeout')));});assert.equal(status,403);}const {connect}=await import('node:net');for(const [host,port] of [['172.30.78.4',3306],['172.30.78.5',6379]])await new Promise((ok,reject)=>{const s=connect({host,port});s.on('connect',()=>{s.destroy();reject(new Error('private service reached'));});s.on('error',()=>ok());s.setTimeout(2000,()=>{s.destroy();ok();});});`;
-  raw(isolatedNodeArgs(EDGE,'172.30.77.7',apiImage,null,peerCode));
-  const crossCode=`const {connect}=await import('node:net');for(const [host,port] of [['172.30.77.2',3001],['172.30.77.3',8080]])await new Promise((ok,reject)=>{const s=connect({host,port});s.on('connect',()=>{s.destroy();reject(new Error('cross bridge API reached'));});s.on('error',()=>ok());s.setTimeout(2000,()=>{s.destroy();ok();});});`;
-  raw(isolatedNodeArgs(originalNetwork,'172.30.79.7',apiImage,null,crossCode));raw([...compose,'exec','-T','web','sh','-c','nc -z -w 2 127.0.0.1 8080 || exit 1; if nc -z -w 2 172.30.78.4 3306; then exit 1; fi; if nc -z -w 2 172.30.78.5 6379; then exit 1; fi']);checks.add('edge-peer-private-isolation');
-  raw([...compose,'exec','-T','api','node','--input-type=module','-e',`const {PrismaClient}=await import('@prisma/client');const db=new PrismaClient();try{await db.$queryRawUnsafe('SELECT id FROM user LIMIT 1');for(const sql of ['CREATE TABLE forbidden (id INT)','SELECT * FROM fakejournal.entry','UPDATE fakejournal.entry SET body=\'tampered\'','SELECT LOAD_FILE(\'/etc/passwd\')']){let denied=false;try{const r=await db.$queryRawUnsafe(sql);if(sql.includes('LOAD_FILE')&&Object.values(r[0])[0]===null)denied=true;}catch{denied=true;}if(!denied)throw new Error('Excess privileges');}}finally{await db.$disconnect();}`]);checks.add('cross-schema-denied');checks.add('exact-role-identities-grants');
+  const peerCode=host=>`const assert=(await import('node:assert/strict')).default;const {get}=await import('node:http');const status=await new Promise((ok,reject)=>{const r=get('http://'+${JSON.stringify(host)}+'/api/v1/health',{headers:{Host:'localhost:17777',Origin:'http://localhost:17777'},agent:false,timeout:4000},s=>{s.resume();s.on('end',()=>ok(s.statusCode));s.on('error',reject);});r.on('error',reject);r.on('timeout',()=>r.destroy(new Error('timeout')));});assert.equal(status,403);`;
+  for(const [probe,host] of [['edgeApi','172.30.77.2:3001'],['edgeWeb','172.30.77.3:8080']])await runSharedIsolationProbe(probe,()=>raw(isolatedNodeArgs(EDGE,'172.30.77.7',apiImage,null,peerCode(host))));
+  const deniedTcpCode=(host,port)=>`const {connect}=await import('node:net');await new Promise((ok,reject)=>{const s=connect({host:${JSON.stringify(host)},port:${JSON.stringify(port)}});s.on('connect',()=>{s.destroy();reject(new Error('Private transport reached'));});s.on('error',()=>ok());s.setTimeout(2000,()=>{s.destroy();ok();});});`;
+  for(const [probe,host,port] of [['edgeMysql','172.30.78.4',3306],['edgeRedis','172.30.78.5',6379]])await runSharedIsolationProbe(probe,()=>raw(isolatedNodeArgs(EDGE,'172.30.77.7',apiImage,null,deniedTcpCode(host,port))));
+  for(const [probe,host,port] of [['crossApi','172.30.77.2',3001],['crossWeb','172.30.77.3',8080]])await runSharedIsolationProbe(probe,()=>raw(isolatedNodeArgs(originalNetwork,'172.30.79.7',apiImage,null,deniedTcpCode(host,port))));
+  await runSharedIsolationProbe('webLoopback',()=>raw([...compose,'exec','-T','web','sh','-c','nc -z -w 2 127.0.0.1 8080']));
+  await runSharedIsolationProbe('webMysql',()=>raw([...compose,'exec','-T','web','sh','-c','if nc -z -w 2 172.30.78.4 3306; then exit 1; fi']));
+  await runSharedIsolationProbe('webRedis',()=>raw([...compose,'exec','-T','web','sh','-c','if nc -z -w 2 172.30.78.5 6379; then exit 1; fi']));checks.add('edge-peer-private-isolation');
+  for(const probe of ['appSelect','appDdl','appRead','appWrite','appFile'])await runSharedIsolationProbe(probe,()=>raw([...compose,'exec','-T','api','node','--input-type=module','-e',appPrivilegeProbeCode(probe)]));checks.add('cross-schema-denied');checks.add('exact-role-identities-grants');
   checkpoint('actual shared-stack browser sessions');
   const browserFixture=join(dir,'browser.json');privateJson(browserFixture,{accounts,redisContainer:byService.redis.Name.slice(1),redisPassword:settings.REDIS_PASSWORD});
   localCommand(process.execPath,[join(root,'node_modules/@playwright/test/cli.js'),'test','-c','tests/ssh-shared-fixtures/playwright.config.ts'],{cwd:root,env:{...process.env,CI:'true',SHARED_BROWSER_FIXTURE:browserFixture},timeout:600000});checks.add('shared-stack-browser-sessions');

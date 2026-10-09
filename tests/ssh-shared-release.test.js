@@ -107,3 +107,25 @@ test('shared smoke diagnostics emit only a complete bounded SHARED error code',a
  assert.equal(sharedSmokeFailureCode(Object.assign(new Error('SHARED_DOCKER_FAILED'),{sharedStage:'PRIVATE_SENTINEL'})),'SHARED_DOCKER_FAILED');
  for(const error of [undefined,null,'SHARED_VOLUME_INVALID',new Error('MYSQL_PWD=PRIVATE_SENTINEL'),new Error('SHARED_VOLUME_INVALID: PRIVATE_SENTINEL'),new Error('SHARED_VOLUME_INVALID\nPRIVATE_SENTINEL'),new Error('SHARED_'+ 'A'.repeat(100)),new Error('SHARED_password')])assert.equal(sharedSmokeFailureCode(error),'SHARED_VERIFICATION_FAILED');
 });
+
+test('isolation diagnostics identify only fixed subprobes without exposing child errors',async()=>{
+ const {runSharedIsolationProbe}=await import('../scripts/ssh-shared-smoke.mjs');
+ assert.equal(typeof runSharedIsolationProbe,'function');
+ assert.equal(await runSharedIsolationProbe('edgeApi',()=>403),403);
+ for(const [name,code] of [['edgeMysql','SHARED_PROBE_EDGE_MYSQL'],['crossWeb','SHARED_PROBE_CROSS_WEB'],['webLoopback','SHARED_PROBE_WEB_LOOPBACK'],['appDdl','SHARED_PROBE_APP_DDL']]){
+  await assert.rejects(()=>runSharedIsolationProbe(name,()=>{throw new Error('PRIVATE_CHILD_STDERR=secret');}),error=>error.message===code&&!JSON.stringify(error).includes('PRIVATE_CHILD'));
+ }
+ await assert.rejects(()=>runSharedIsolationProbe('PRIVATE_INPUT',()=>{}),error=>error.message==='SHARED_PROBE_INVALID');
+});
+
+test('every generated privilege probe parses quoted SQL and retains its denied operation',async()=>{
+ const {appPrivilegeProbeCode}=await import('../scripts/ssh-shared-smoke.mjs');
+ const {Script}=await import('node:vm');assert.equal(typeof appPrivilegeProbeCode,'function');
+ const statements={appSelect:'SELECT id FROM user LIMIT 1',appDdl:'CREATE TABLE forbidden (id INT)',appRead:'SELECT * FROM fakejournal.entry',appWrite:"UPDATE fakejournal.entry SET body='tampered'",appFile:"SELECT LOAD_FILE('/etc/passwd')"};
+ for(const [name,sql] of Object.entries(statements)){
+  const code=appPrivilegeProbeCode(name);assert.doesNotThrow(()=>new Script('(async()=>{'+code+'})'));
+  assert.ok(code.includes('const sql='+JSON.stringify(sql)+';'),'SQL must be encoded as an actual JavaScript string literal');
+  if(name!=='appSelect')assert.ok(code.includes("if(!denied)throw new Error('Excess privileges')"));
+ }
+ assert.throws(()=>appPrivilegeProbeCode('untrusted SQL'),error=>error.message==='SHARED_PROBE_INVALID');
+});
