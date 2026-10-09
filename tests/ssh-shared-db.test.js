@@ -91,3 +91,12 @@ test('probe JSON framing failures have a separate static code and never echo cli
  const context={privateDir,settings:{MYSQL_BACKUP_PASSWORD:'1'.repeat(64)},input:{externalMysql:{serverUuid:uuid,serverVersion:'8.4.9'}},manifest:{images:[{tag:'star-oracle-mysql-client:local',id:'sha256:'+'a'.repeat(64)}]},run:()=> 'private-client-banner-or-secret\n{}'};
  try{await assert.rejects(host.probeSharedClient(context),error=>error.message==='SHARED_DB_IDENTITY_JSON');context.run=()=> '0x7B7D';await assert.rejects(host.probeSharedClient(context),error=>error.message==='SHARED_DB_IDENTITY_JSON_HEX');}finally{rmSync(privateDir,{recursive:true,force:true});}
 });
+test('role identity queries force character text before MySQL JSON can encode the binary CURRENT_ROLE cache',()=>{
+ // MySQL 8.4.11 CURRENT_ROLE uses a default binary String cache and set_ascii
+ // preserves its charset. JSON_OBJECT wraps that value as an opaque scalar.
+ const roleText='CAST(CURRENT_ROLE() AS CHAR CHARACTER SET utf8mb4)';
+ assert.ok(db.identityQuery.includes(roleText+' AS currentRole'),'Prisma identity needs an explicit text result');
+ assert.ok(db.identityJsonQuery.includes("'currentRole', "+roleText),'JSON identity must receive character text');
+ for(const currentRole of ['base64:type15:Tk9ORQ==','base64:type253:Tk9ORQ==','',null,'none','`operator`@`%`'])assert.throws(()=>db.validateDatabaseIdentity({...fixture(),identity:{...fixture().identity,currentRole}}),error=>error.message==='SHARED_DB_IDENTITY_ACTIVE_ROLES');
+ assert.equal(db.validateDatabaseIdentity(fixture()),true);
+});

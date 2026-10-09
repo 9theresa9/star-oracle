@@ -51,8 +51,11 @@ export function validateDatabaseIdentity({role, identity, grants, expectedUuid, 
  databasePolicy(actual.length === allowed.length && new Set(actual).size === actual.length && actual.every(privilege => allowed.includes(privilege)), 'SHARED_DB_GRANTS');
  return true;
 }
-export const identityQuery = "SELECT CURRENT_USER() AS currentUser, @@GLOBAL.server_uuid AS serverUuid, VERSION() AS serverVersion, DATABASE() AS `database`, CURRENT_ROLE() AS currentRole, @@GLOBAL.mandatory_roles AS mandatoryRoles";
-export const identityJsonQuery = "SELECT JSON_OBJECT('currentUser', CURRENT_USER(), 'serverUuid', @@GLOBAL.server_uuid, 'serverVersion', VERSION(), 'database', DATABASE(), 'currentRole', CURRENT_ROLE(), 'mandatoryRoles', @@GLOBAL.mandatory_roles)";
+// CURRENT_ROLE has a binary runtime String cache in MySQL 8.4.11 even though
+// its declared metadata is text. Cast before JSON_OBJECT to avoid opaque/base64
+// serialization; the role policy still accepts only the exact string NONE.
+export const identityQuery = "SELECT CURRENT_USER() AS currentUser, @@GLOBAL.server_uuid AS serverUuid, VERSION() AS serverVersion, DATABASE() AS `database`, CAST(CURRENT_ROLE() AS CHAR CHARACTER SET utf8mb4) AS currentRole, @@GLOBAL.mandatory_roles AS mandatoryRoles";
+export const identityJsonQuery = "SELECT JSON_OBJECT('currentUser', CURRENT_USER(), 'serverUuid', @@GLOBAL.server_uuid, 'serverVersion', VERSION(), 'database', DATABASE(), 'currentRole', CAST(CURRENT_ROLE() AS CHAR CHARACTER SET utf8mb4), 'mandatoryRoles', @@GLOBAL.mandatory_roles)";
 export function validateProvisioningAudit(audit: unknown, database: string, serverUuid: string): true {
  const a = audit as Record<string, unknown> | undefined;
  databasePolicy(a && Object.keys(a).sort().join(',') === 'noAnonymousAccounts,noFallbackAccounts,noRolesOrExtraGrants,reviewedAt,schema,serverUuid,tablesOnly' &&
