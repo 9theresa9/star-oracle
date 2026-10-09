@@ -145,7 +145,10 @@ test('failed archive projection and changed source data do not authorize a fresh
 
 test('only a terminal attempt code permits an explicit new UUID with renewed consent',async({page})=>{
  const fixture=await setup(page,async(route,attempt,index)=>{
-  if(index===1)return route.fulfill({status:503,headers,json:{error:{message:'本次 AI 尝试未完成，请选择重新尝试',code:'AI_ATTEMPT_FAILED'}}});
+  if(index===1){
+   fixture.reports=[makeReport(attempt,'failed')];
+   return route.fulfill({status:503,headers,json:{error:{message:'本次 AI 尝试未完成，请选择重新尝试',code:'AI_ATTEMPT_FAILED'}}});
+  }
   return route.fulfill({headers,json:makeReport(attempt)});
  });
  await page.getByRole('button',{name:'生成仅属于你的月回顾',exact:true}).click();
@@ -155,6 +158,8 @@ test('only a terminal attempt code permits an explicit new UUID with renewed con
  await expect(page.getByRole('button',{name:'重试上次回顾',exact:true})).toBeDisabled();
  await expect(page.locator('.ai-review')).toContainText('AI 额度');
  expect(fixture.attempts).toHaveLength(1);
+ await page.getByRole('button',{name:'刷新',exact:true}).click();
+ await expect(page.locator('.insight-report').getByRole('button',{name:'删除这份回顾',exact:true})).toBeEnabled();
 
  await startNew.click();
  await expect(startNew).toHaveCount(0);
