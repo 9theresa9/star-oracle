@@ -3,7 +3,7 @@
 # Sources: https://repo.mysql.com/yum/mysql-8.4-community/el/9/
 # Key: https://dev.mysql.com/doc/refman/8.4/en/checking-gpg-signature.html
 FROM oraclelinux:9-slim
-RUN microdnf install -y ca-certificates curl-minimal gnupg2 gawk \
+RUN microdnf install -y ca-certificates curl gnupg2 gawk \
  && curl --fail --silent --show-error --location https://repo.mysql.com/RPM-GPG-KEY-mysql-2025 -o /tmp/mysql-key \
  && test "$(gpg --batch --show-keys --with-colons /tmp/mysql-key 2>/dev/null | awk -F: '$1 == "fpr" {print $10; exit}')" = BCA43417C3B485DD128EC6D4B7B3B788A8D3785C \
  && rpm --import /tmp/mysql-key \
