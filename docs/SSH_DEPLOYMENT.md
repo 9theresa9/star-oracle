@@ -114,7 +114,28 @@ BACKUP_DEPLOYMENT_MODE=ssh-only ENV_FILE=/安全目录/.env.ssh \
 node scripts/ssh-deploy.mjs stop --env-file /安全目录/.env.ssh
 ```
 
-停止操作保留 MySQL/Redis 数据卷，即使镜像包损坏也可按固定项目标签停机。升级时先备份、停止旧版本，保存旧包与密钥，解压并核对新成功 CI 包、load 新镜像，再从新目录 check/start。不要同时运行两个版本，不要直接使用 `docker compose up`、`down -v` 或删卷。数据库迁移可能影响回退，不能只换回旧镜像就假定数据兼容。
+停止操作保留 MySQL/Redis 数据卷，即使镜像包损坏也可按固定项目标签停机。升级须按以下顺序执行：
+
+1. 先备份，保存旧版本包与密钥；从旧版本目录运行上面的 `stop`，确认停止成功。
+2. 只列出同时带有此固定项目名和 SSH-only 所有权标签的容器，逐一核对名称、ID 和停止状态：
+
+   ```bash
+   docker --host=unix:///var/run/docker.sock container ls --all \
+     --filter label=com.docker.compose.project=star-oracle-ssh \
+     --filter label=io.star-oracle.deployment=ssh-only \
+     --format 'table {{.ID}}\t{{.Names}}\t{{.Status}}'
+   ```
+
+3. 删除刚才核对过的旧容器。在下面命令中逐个填入该列表里的已停止容器 ID，不使用其他项目的 ID，也不添加 `--force`、`-f`、`--volumes` 或 `-v`：
+
+   ```bash
+   docker --host=unix:///var/run/docker.sock container rm 已核对的容器ID1 已核对的容器ID2
+   ```
+
+   此命令只移除容器，保留 MySQL/Redis 命名数据卷和网络；运行中的容器会被拒绝删除。若状态仍为运行中或删除失败，停止升级并查明原因。旧容器必须移除，因为新包的启动器会拒绝旧镜像 ID，以及指向旧版本目录的 MySQL 初始化脚本挂载；不要跳过这些检查。
+4. 在独立新版本目录解压并核对成功 CI 包，执行 `ssh-release.mjs load`，再从新目录 `check` / `start`。它会按新包重新创建容器，重新挂载原有命名数据卷，检查实际配置后启动。
+
+不要同时运行两个版本，不要直接使用 `docker compose up`、`down -v`、全局容器清理或删卷。数据库迁移可能影响回退，不能只换回旧镜像就假定数据兼容。
 
 ## 验收与证据范围
 

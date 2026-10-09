@@ -81,7 +81,7 @@ services:
       redis: {condition: service_healthy}
       migrate: {condition: service_completed_successfully}
     healthcheck:
-      test: [CMD, node, -e, "fetch('http://127.0.0.1:3001/api/v1/health',{headers:{Host:'localhost:17777'}}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      test: [CMD, node, -e, "const r=require('node:http').get('http://127.0.0.1:3001/api/v1/health',{headers:{Host:'localhost:17777'},agent:false,timeout:4000},s=>{s.on('error',()=>{process.exitCode=1});s.resume();if(s.statusCode!==200)process.exitCode=1});r.on('timeout',()=>{process.exitCode=1;r.destroy()});r.on('error',()=>{process.exitCode=1})"]
       interval: 5s
       timeout: 5s
       retries: 30

@@ -266,10 +266,18 @@ export function runDeployment({action,root,settings,run=commandRunner(settings),
       for(const network of [NETWORK,BACKEND])validateNetwork(JSON.parse(run([...baseDocker,'network','inspect',network]))[0],current);
     }
   }catch(error){
+    // Capture whitelisted states before cleanup destroys evidence of the failed
+    // service. Never expose Env, Health.Log/Output, raw logs or inspect objects.
+    let observed,diagnostic='Startup inspection unavailable.';
+    try{
+      observed=ownedContainers(run);
+      const safe=observed.filter(c=>Object.hasOwn(services,c.Config?.Labels?.['com.docker.compose.service']??''));
+      if(safe.length)diagnostic=`Startup inspection: ${safe.map(safeContainerState).join('; ')}.`;
+    }catch{}
     // Only labeled containers in this one fixed project may be stopped. Never
     // run down, delete volumes, prune resources, or acquire another project.
-    try{stopOwned(run,ownedContainers(run));}catch{throw new Error(`${error.message} Automatic stop failed; stop the star-oracle-ssh containers before proceeding.`);}
-    throw error;
+    try{stopOwned(run,observed??ownedContainers(run));}catch{throw new Error(`${error.message} ${diagnostic} Automatic stop failed; stop the star-oracle-ssh containers before proceeding.`);}
+    throw new Error(`${error.message} ${diagnostic}`,{cause:error});
   }
 }
 const maintenanceOperations=['create','assign-username','reset-password','revoke-all-sessions'];

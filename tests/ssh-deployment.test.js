@@ -208,3 +208,54 @@ test('SSH health wait allows starting state and rejects unhealthy or timed-out d
     if(outcome==='healthy'){assert.equal(wait().length,5);assert.ok(polls>=2);}else assert.throws(wait,/SSH policy:.*(?:unhealthy|timed out)/);
   }
 });
+
+test('committed SSH API healthcheck sends the exact Host through a real Node24 request',async t=>{
+  const {createServer}=await import('node:http');
+  const {spawn}=await import('node:child_process');
+  const compose=readFileSync(join(root,'compose.ssh.yml'),'utf8');
+  const source=JSON.parse(compose.match(/test:\s*\[CMD, node, -e, ("(?:[^"\\]|\\.)*")\]/)[1]);
+  let observed;
+  const server=createServer((req,res)=>{observed=req.headers.host;res.statusCode=observed==='localhost:17777'?200:403;res.end();});
+  await new Promise((ok,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',ok);});
+  t.after(()=>server.close());
+  const code=source.replace('http://127.0.0.1:3001/api/v1/health',`http://127.0.0.1:${server.address().port}/api/v1/health`);
+  const child=spawn(process.execPath,['-e',code],{stdio:'ignore'});
+  const status=await new Promise((ok,reject)=>{child.once('error',reject);child.once('exit',ok);});
+  assert.equal(observed,'localhost:17777','healthcheck must preserve the literal authority accepted by the API');
+  assert.equal(status,0,'a healthy strict API must pass the committed health probe');
+});
+
+test('SSH captures only safe inspected service state before stopping after Compose start fails',async()=>{
+  const {runDeployment}=await implementation();let stopped=false,attempted=false;
+  const run=args=>{if(args.includes('version'))return '28.0.4';if(args.includes('config'))return JSON.stringify(configuration());if(args.includes('ps'))return containers().map(c=>c.Id).join('\n');if(args.includes('network'))return JSON.stringify([network(args.at(-1)==='star-oracle-ssh-backend'?'backend':'ssh')]);if(args.includes('inspect')){const c=containers();if(attempted&&!stopped){c[0].State={Running:true,Status:'running',ExitCode:0,Health:{Status:'unhealthy',Log:[{Output:'PRIVATE_HEALTH_OUTPUT_SENTINEL'}]}};c[0].Config.Env.push('PRIVATE_ENV_SENTINEL=secret');}return JSON.stringify(c);}if(args.includes('stop')){stopped=true;return '';}if(args.includes('start')){attempted=true;throw new Error('Docker Compose start failed (1); raw output withheld to protect credentials.');}return '';};
+  assert.throws(()=>runDeployment({action:'start',root,settings:{},run}),error=>{
+    assert.match(error.message,/api: status=running, health=unhealthy, exit=0/);
+    assert.doesNotMatch(error.message,/PRIVATE_HEALTH|PRIVATE_ENV|secret/);
+    return true;
+  });
+  assert.equal(stopped,true);
+});
+
+test('committed container peer probes really send a valid Host before expecting source rejection',async t=>{
+  const {createServer}=await import('node:http');const {spawn}=await import('node:child_process');
+  const source=readFileSync(join(root,'scripts/ssh-container-smoke.mjs'),'utf8').match(/const networkProbe=`([\s\S]*?)`;/)[1].split("    const {connect}")[0];
+  const seen=[];const server=createServer((req,res)=>{seen.push(req.headers.host);res.statusCode=403;res.end();});
+  await new Promise((ok,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',ok);});t.after(()=>server.close());
+  const code=source.replaceAll('http://172.30.77.3:8080/api/v1/health',`http://127.0.0.1:${server.address().port}/api/v1/health`).replaceAll('http://172.30.77.2:3001/api/v1/health',`http://127.0.0.1:${server.address().port}/api/v1/health`);
+  const child=spawn(process.execPath,['--input-type=module','-e',code],{stdio:'ignore'});const status=await new Promise((ok,reject)=>{child.once('error',reject);child.once('exit',ok);});
+  assert.deepEqual(seen,['localhost:17777','localhost:17777'],'invalid Host would make the peer ACL test pass for the wrong reason');assert.equal(status,0);
+});
+
+test('committed SSH API healthcheck fails on forbidden and stalled responses',async t=>{
+  const {createServer}=await import('node:http');const {spawn}=await import('node:child_process');
+  const source=JSON.parse(readFileSync(join(root,'compose.ssh.yml'),'utf8').match(/test:\s*\[CMD, node, -e, ("(?:[^"\\]|\\.)*")\]/)[1]);
+  for(const behavior of ['forbidden','stalled']){
+    const server=createServer((req,res)=>{if(behavior==='forbidden'){res.statusCode=403;res.end();}else{res.writeHead(200);res.flushHeaders();res.write('partial');}});
+    await new Promise((ok,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',ok);});
+    const code=source.replace('http://127.0.0.1:3001/api/v1/health',`http://127.0.0.1:${server.address().port}/api/v1/health`).replace('timeout:4000','timeout:40');
+    const child=spawn(process.execPath,['-e',code],{stdio:'ignore'});
+    const timer=setTimeout(()=>child.kill('SIGKILL'),2000);
+    const status=await new Promise((ok,reject)=>{child.once('error',reject);child.once('exit',ok);});clearTimeout(timer);server.closeAllConnections();await new Promise(ok=>server.close(ok));
+    assert.equal(status,1,`${behavior} response must fail closed before Docker's health timeout`);
+  }
+});

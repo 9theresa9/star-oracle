@@ -3,7 +3,7 @@ on:
   push:
     branches: [main, feat/comprehensive-oracle]
   pull_request:
-    paths: ['apps/**', 'packages/**', 'compose*.yml', 'infra/**', 'tests/**', 'package*.json', 'scripts/**', '.github/workflows/production-verify.yml']
+    paths: ['apps/**', 'packages/**', 'compose*.yml', 'infra/**', 'tests/**', 'package*.json', 'scripts/**', 'docs/**', '.env.ssh.example', '.github/workflows/production-verify.yml']
 permissions:
   contents: read
 concurrency:

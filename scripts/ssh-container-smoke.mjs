@@ -57,8 +57,10 @@ try {
   // Host and Origin are completely valid. This uses a real third container.
   const networkProbe=`
     const assert=await import('node:assert/strict');
+    const {get}=await import('node:http');
     for(const url of ['http://172.30.77.3:8080/api/v1/health','http://172.30.77.2:3001/api/v1/health']){
-      const r=await fetch(url,{headers:{Host:'localhost:17777',Origin:'http://localhost:17777'},signal:AbortSignal.timeout(5000)});assert.equal(r.status,403,url);
+      const status=await new Promise((ok,reject)=>{const r=get(url,{headers:{Host:'localhost:17777',Origin:'http://localhost:17777'},agent:false,timeout:5000},s=>{s.resume();s.on('end',()=>ok(s.statusCode));s.on('error',reject);});r.on('timeout',()=>r.destroy(new Error('Peer probe timeout')));r.on('error',reject);});
+      assert.equal(status,403,url);
     }
     const {connect}=await import('node:net');
     for(const [host,port] of [['172.30.78.4',3306],['172.30.78.5',6379]]){
