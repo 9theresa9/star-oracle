@@ -181,6 +181,21 @@ test('auto-removed worker disappearance after stop is verified as successful cle
 test('configuration rejection stops proven own ingress before returning failure',()=>locked(async()=>{
  const f=fixture({running:true}),{runSharedDeployment}=await launcher();f.config.services.api.command=['unsafe'];await assert.rejects(runSharedDeployment({...f,action:'start'}));assert.equal(f.service('api').State.Running,false);assert.equal(f.service('web').State.Running,false);
 }));
+test('shared diagnostics name the fixed policy assertion and inspection stage without actual values',()=>locked(async()=>{
+ const {runSharedDeployment,formatSharedFailure}=await launcher();assert.equal(typeof formatSharedFailure,'function');
+ const f=fixture({prepared:false,attached:false});f.state.afterCreate=()=>{f.service('api').Config.Cmd=['PRIVATE_COMMAND_SENTINEL'];};
+ await assert.rejects(runSharedDeployment({...f,action:'prepare'}),error=>{
+  assert.equal(error.message,'SHARED_POLICY_ACTUAL_USER_COMMAND_ENTRYPOINT_CHANGED');
+  assert.equal(formatSharedFailure(error),'SHARED_POLICY_ACTUAL_USER_COMMAND_ENTRYPOINT_CHANGED [SHARED_CONTAINER_INSPECTION]');
+  assert.ok(!formatSharedFailure(error).includes('PRIVATE_COMMAND_SENTINEL'));return true;
+ });
+}));
+test('shared diagnostics reject policy-like raw output and unknown stage values',async()=>{
+ const {formatSharedFailure}=await launcher();assert.equal(typeof formatSharedFailure,'function');
+ for(const message of ['Shared SSH policy: PRIVATE_ENV_SENTINEL','Shared SSH policy: actual resources differ PRIVATE_ENV_SENTINEL','{"AUTH_SECRET":"PRIVATE_ENV_SENTINEL"}']){
+  const error=new Error(message);error.sharedStage='PRIVATE_STAGE_SENTINEL';assert.equal(formatSharedFailure(error),'SHARED_VALIDATION_FAILED');
+ }
+});
 test('check rejects unhealthy running dependencies and leaves ingress stopped',()=>locked(async()=>{
  const f=fixture({running:true}),{runSharedDeployment}=await launcher();f.service('redis').State.Health.Status='unhealthy';await assert.rejects(runSharedDeployment({...f,action:'check'}),/SHARED_SERVICE_UNHEALTHY/);assert.equal(f.service('api').State.Running,false);assert.equal(f.service('web').State.Running,false);
 }));

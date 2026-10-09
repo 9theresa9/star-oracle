@@ -20,7 +20,41 @@ const fixedLock='/run/lock/star-oracle-shared.lock';
 const services=['redis','migrate','api','web'];
 const ingress=['web','api','migrate'];
 const ensure=(ok,code)=>{if(!ok)throw new Error(code);};
-const safeError=error=>new Error(/^SHARED_[A-Z_]+$/.test(error?.message??'')?error.message:'SHARED_VALIDATION_FAILED');
+// Only exact, source-defined assertion text is translated. Never interpolate
+// actual Docker fields, parser output, environment values, or provider errors.
+const policyDiagnostics=new Map([
+ 'invalid deployment input fields','invalid external database fields','external database identity is incomplete',
+ 'explicit original network inventory required','invalid original network identity','duplicate original network',
+ 'invalid original network address','original network overlaps the fixed SSH topology','invalid original aliases',
+ 'explicit original default route required','trusted provisioning audit is incomplete',
+ 'external container or image changed','external database must already be running','external database must not expose host ports',
+ 'external database must never carry owned labels','external network inventory changed','approved backend attachment required',
+ 'original external network endpoint changed','external backend endpoint differs','ambiguous external default routes',
+ 'invalid route observation','external default route changed','only fixed loopback/NAT options allowed',
+ 'invalid or duplicate actual environment','unexpected shared service/network/volume inventory','dedicated Redis volume required',
+ 'fixed owned IPv4 topology required','service runtime/security settings differ','service resources changed','bounded private logs required',
+ 'service peer address changed','service command changed','migration healthcheck override','service healthcheck changed',
+ 'web must publish only the fixed loopback port','web environment overrides forbidden','only web may publish a port',
+ 'Redis storage/secret differs','application bind mounts forbidden','database target must be the dedicated schema and role',
+ 'shared SQL identity differs','migration environment override','application security environment changed',
+ 'application secret/cache configuration differs','application environment override','exactly four owned containers required',
+ 'unknown or duplicate owned service','actual container name differs','runtime image differs from release',
+ 'actual user/command/entrypoint changed','actual migration healthcheck changed','actual healthcheck changed',
+ 'actual environment differs','actual host isolation differs','actual security settings changed','actual resources differ',
+ 'actual log rotation differs','unreviewed actual mount','actual web publication changed','unpublished service has a port',
+ 'actual runtime publication changed','actual service network inventory changed','actual service peer changed',
+ 'actual service DNS aliases changed','exact owned network inventory required','actual network differs',
+ 'external endpoint on wrong network','unrelated endpoint on owned network'
+].map(message=>['Shared SSH policy: '+message,'SHARED_POLICY_'+message.toUpperCase().replace(/[^A-Z]+/g,'_')]));
+const diagnosticStages=new Set(['SHARED_DAEMON_INSPECTION','SHARED_ENGINE_INSPECTION','SHARED_RELEASE_INSPECTION',
+ 'SHARED_IMAGE_INSPECTION','SHARED_CONFIG_INSPECTION','SHARED_CONTAINER_INVENTORY','SHARED_EXTERNAL_INSPECTION',
+ 'SHARED_NETWORK_INVENTORY','SHARED_HOST_ROUTE_INSPECTION','SHARED_EXTERNAL_ROUTE_INSPECTION',
+ 'SHARED_VOLUME_INSPECTION','SHARED_CONTAINER_INSPECTION','SHARED_NETWORK_INSPECTION','SHARED_PREPARE_CREATE']);
+function safeError(error){
+ const message=policyDiagnostics.get(error?.message)??(/^SHARED_[A-Z_]{1,96}$/.test(error?.message??'')?error.message:'SHARED_VALIDATION_FAILED');
+ const safe=new Error(message);if(diagnosticStages.has(error?.sharedStage))safe.sharedStage=error.sharedStage;return safe;
+}
+export function formatSharedFailure(error){const safe=safeError(error);return safe.message+(safe.sharedStage?' ['+safe.sharedStage+']':'');}
 const label=c=>c.Config?.Labels??{};
 const service=c=>label(c)['com.docker.compose.service'];
 const stopped=c=>c.State?.Running===false&&!c.State.Paused&&!c.State.Restarting&&['created','exited','dead'].includes(c.State.Status);
@@ -176,18 +210,26 @@ async function inspectRedisVolume(context,{allowMissing=false}={}){
 }
 async function inspectState(context,{phase='attached',allowPartial=false}={}){
  const {run,input,config,manifest,images}=context;
+ context.stage='SHARED_CONTAINER_INVENTORY';
  const {owned,transient}=await inventory(context);ensure(transient.length===0,'SHARED_STALE_WORKER');
+ context.stage='SHARED_EXTERNAL_INSPECTION';
  const [external]=await inspectIds(run,[input.externalMysql.containerId]);
+ context.stage='SHARED_NETWORK_INVENTORY';
  const networkIds=splitIds(await run([...docker,'network','ls','-q','--no-trunc']));
  const allNetworks=networkIds.length?JSON.parse(await run([...docker,'network','inspect',...networkIds])):[];
  ensure(Array.isArray(allNetworks)&&allNetworks.length===networkIds.length,'SHARED_NETWORK_INVENTORY');noSubnetOverlap(allNetworks);
  const networks=allNetworks.filter(n=>[EDGE,BACKEND].includes(n.Name));
+ context.stage='SHARED_HOST_ROUTE_INSPECTION';
  validateSharedHostRoutes(await context.readHostRoutes(),networks);
+ context.stage='SHARED_EXTERNAL_INSPECTION';
  validateExternalMysql(external,input,{phase,backendId:networks.find(n=>n.Name===BACKEND)?.Id});
+ context.stage='SHARED_EXTERNAL_ROUTE_INSPECTION';
  validateExternalRoute(await run([...docker,'exec',input.externalMysql.containerId,'cat','/proc/net/route']),input);
+ context.stage='SHARED_VOLUME_INSPECTION';
  await inspectRedisVolume(context,{allowMissing:allowPartial});
- validateSharedContainers(owned,config,manifest,images,{allowPartial});validateSharedNetworks(networks,owned,external,input,{allowPartial});
- return {containers:owned,networks,external};
+ context.stage='SHARED_CONTAINER_INSPECTION';validateSharedContainers(owned,config,manifest,images,{allowPartial});
+ context.stage='SHARED_NETWORK_INSPECTION';validateSharedNetworks(networks,owned,external,input,{allowPartial});
+ context.stage=undefined;return {containers:owned,networks,external};
 }
 function makeContext({root,input,settings,manifest,run,inspectDaemon=inspectSharedDaemon,readHostRoutes=()=>readFileSync('/proc/net/route','utf8')}){
  validateInput(input);ensure(typeof root==='string'&&root.startsWith('/'),'SHARED_ROOT');
@@ -197,16 +239,19 @@ function makeContext({root,input,settings,manifest,run,inspectDaemon=inspectShar
 }
 async function initialize(context){
  const {root,input,run:execute,inspectDaemon}=context;let {manifest}=context;
+ context.stage='SHARED_DAEMON_INSPECTION';
  await inspectDaemon();
+ context.stage='SHARED_ENGINE_INSPECTION';
  validateEngine(await execute([...docker,'version','--format','{{.Server.Version}}']));
+ context.stage='SHARED_RELEASE_INSPECTION';
  manifest??=readSharedManifest(root);
  ensure(Array.isArray(manifest.images)&&manifest.images.length===4&&new Set(manifest.images.map(i=>i.tag)).size===4&&manifest.images.every(i=>IMAGES.includes(i.tag)&&/^sha256:[a-f0-9]{64}$/.test(i.id)&&/^linux\/(amd64|arm64)$/.test(i.platform)),'SHARED_IMAGE_MANIFEST');
- const platform=(await execute([...docker,'info','--format','{{.OSType}}/{{.Architecture}}'])).trim().replace('/x86_64','/amd64').replace('/aarch64','/arm64');
+ context.stage='SHARED_IMAGE_INSPECTION';const platform=(await execute([...docker,'info','--format','{{.OSType}}/{{.Architecture}}'])).trim().replace('/x86_64','/amd64').replace('/aarch64','/arm64');
  context.manifest=manifest;
  const images=JSON.parse(await execute([...docker,'image','inspect',...IMAGES]));context.images=images;
  ensure(Array.isArray(images)&&images.length===4&&manifest.images.every(m=>m.platform===platform&&images.some(i=>i.Id===m.id&&i.RepoTags?.includes(m.tag)&&`${i.Os}/${i.Architecture}`===m.platform)),'SHARED_IMAGE_MISMATCH');
- const config=validateSharedConfig(parseSharedComposeConfig(await execute([...sharedDockerArgs(root),'config','--format','json'])),root,input);
- context.config=config;
+ context.stage='SHARED_CONFIG_INSPECTION';const config=validateSharedConfig(parseSharedComposeConfig(await execute([...sharedDockerArgs(root),'config','--format','json'])),root,input);
+ context.config=config;context.stage=undefined;
 }
 async function ready(context,name){
  const deadline=Date.now()+240000;
@@ -249,8 +294,9 @@ async function actionScope(options,operation){
   const lock=lockContext.getStore();ensure(!lock.active,'SHARED_OPERATION_ACTIVE');lock.active=true;let context;
   try{context=makeContext(options);await initialize(context);ensure(!lock.signal.aborted,'SHARED_INTERRUPTED');return await operation(context);}
   catch(error){
+   const diagnostic=safeError(error);if(diagnosticStages.has(context?.stage))diagnostic.sharedStage=context.stage;
    if(context){try{await stopServices(context);await cleanupTransient(context);}catch{throw new Error('SHARED_CLEANUP_FAILED_INGRESS_MUST_REMAIN_STOPPED');}}
-   throw safeError(error);
+   throw diagnostic;
   }finally{lock.active=false;}
  });
 }
@@ -263,6 +309,7 @@ export async function runSharedDeployment(options){
    // Phase one admits only the exact external original inventory, or an already
    // approved attachment to the actual inspected backend. No external mutation.
    await inspectState(context,{phase:'prepare',allowPartial:true});
+   context.stage='SHARED_PREPARE_CREATE';
    await context.run([...sharedDockerArgs(context.root),'create','--no-recreate','--no-build','--pull','never',...services]);
    const state=await inspectState(context,{phase:'prepare'});ensure(state.containers.filter(c=>ingress.includes(service(c))).every(stopped),'SHARED_PREPARE_INGRESS');return state;
   }
@@ -307,4 +354,4 @@ async function main(){
  if(action==='account')await withSharedMaintenance({...options,operation:context=>account(context,accountOperation)});else await runSharedDeployment({...options,action});
  console.log(action==='start'?'Shared SSH application is healthy at http://localhost:17777.':action==='prepare'?'Owned resources prepared. External attachment and account provisioning remain operator actions.':action==='check'?'Shared SSH state and available database identities verified.':'Shared operation completed. API/Web remain stopped.');
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href)main().catch(error=>{console.error(safeError(error).message);process.exitCode=1;});
+if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href)main().catch(error=>{console.error(formatSharedFailure(error));process.exitCode=1;});

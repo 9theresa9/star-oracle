@@ -98,3 +98,12 @@ test('the validated loader accepts Docker OCI image-save archives with matching 
  writeFileSync(f.path,tar([...entries,['manifest.json',JSON.stringify(records)],['index.json',JSON.stringify({schemaVersion:2,manifests:descriptors})]]));
  await assert.doesNotReject(()=>api.validateImageArchive(f.path,f.inventory));
 });
+
+test('shared smoke diagnostics emit only a complete bounded SHARED error code',async()=>{
+ const {sharedSmokeFailureCode}=await import('../scripts/ssh-shared-smoke.mjs');
+ assert.equal(typeof sharedSmokeFailureCode,'function');
+ assert.equal(sharedSmokeFailureCode(new Error('SHARED_VOLUME_INVALID')),'SHARED_VOLUME_INVALID');
+ assert.equal(sharedSmokeFailureCode(Object.assign(new Error('SHARED_DOCKER_FAILED'),{sharedStage:'SHARED_PREPARE_CREATE'})),'SHARED_DOCKER_FAILED [SHARED_PREPARE_CREATE]');
+ assert.equal(sharedSmokeFailureCode(Object.assign(new Error('SHARED_DOCKER_FAILED'),{sharedStage:'PRIVATE_SENTINEL'})),'SHARED_DOCKER_FAILED');
+ for(const error of [undefined,null,'SHARED_VOLUME_INVALID',new Error('MYSQL_PWD=PRIVATE_SENTINEL'),new Error('SHARED_VOLUME_INVALID: PRIVATE_SENTINEL'),new Error('SHARED_VOLUME_INVALID\nPRIVATE_SENTINEL'),new Error('SHARED_'+ 'A'.repeat(100)),new Error('SHARED_password')])assert.equal(sharedSmokeFailureCode(error),'SHARED_VERIFICATION_FAILED');
+});

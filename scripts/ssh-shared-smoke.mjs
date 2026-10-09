@@ -11,9 +11,15 @@ import {gzipSync} from 'node:zlib';
 import {pathToFileURL} from 'node:url';
 import {commandRunner,dockerEnvironment,inspectLocalDaemon,validateEngine} from './ssh-deploy.mjs';
 import {inspectSharedImages,REQUIRED_CHECKS} from './ssh-shared-release.mjs';
+import {formatSharedFailure} from './ssh-shared-deploy.mjs';
 const docker=['--host','unix:///var/run/docker.sock'];
 let stage='preflight';
 const checkpoint=name=>{stage=name;console.log('Shared synthetic check: '+name);};
+export function sharedSmokeFailureCode(error){
+ const code=typeof error?.message==='string'?error.message:'';
+ const safe=new Error(/^SHARED_[A-Z_]{1,96}$/.test(code)?code:'SHARED_VERIFICATION_FAILED');
+ safe.sharedStage=error?.sharedStage;return formatSharedFailure(safe);
+}
 export function guardExternalLifecycle(run,id,name){
  return args=>{const mutation=args.some(a=>['start','stop','restart','rm','remove','kill','pause','unpause','rename','update','connect','disconnect'].includes(a));assert.ok(!(mutation&&args.some(a=>a===id||a===name)),'Shared smoke: launcher attempted external lifecycle mutation');return run(args);};
 }
@@ -210,4 +216,4 @@ async function verifyBackupAndRestore({root,dir,input,settings,manifest,run,raw,
  assert.equal(sql(`SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='${historical.candidate.database}' AND table_name='reading_conversation'`),'1');assert.equal(sql(`SELECT COUNT(*) FROM ${historical.candidate.database}._prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL`),sql('SELECT COUNT(*) FROM staroracle._prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL'));
  assert.equal(sourceDump(),originalDump,'Original database changed during candidate recovery');assert.equal(redis('GET','synthetic:original-restore-sentinel'),cacheSentinel,'Original Redis was altered');verifyExternal();checks.add('encrypted-backup-candidate-restore');
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href){const [option,path,...extra]=process.argv.slice(2);if(option!=='--proof'||!path?.startsWith('/')||extra.length)throw new Error('Usage: node scripts/ssh-shared-smoke.mjs --proof /absolute/proof.json');runSharedSmoke(path).catch(()=>{console.error('Shared synthetic verification failed during '+stage+'; private fixture output withheld.');process.exitCode=1;});}
+if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href){const [option,path,...extra]=process.argv.slice(2);if(option!=='--proof'||!path?.startsWith('/')||extra.length)throw new Error('Usage: node scripts/ssh-shared-smoke.mjs --proof /absolute/proof.json');runSharedSmoke(path).catch(error=>{console.error('Shared synthetic verification failed during '+stage+' ('+sharedSmokeFailureCode(error)+'); private fixture output withheld.');process.exitCode=1;});}
