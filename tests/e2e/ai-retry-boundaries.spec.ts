@@ -1,5 +1,7 @@
 import {test,expect} from '@playwright/test';
 import {basicInterpretation,type Reading} from '@star-oracle/domain';
+// Fault-injection routes must own their requests; the dedicated PWA suite keeps workers enabled.
+test.use({serviceWorkers:'block'});
 const actor={id:'synthetic-owner',name:'星空旅人',email:'synthetic@example.test',role:'user',twoFactorEnabled:false,sessionBinding:'synthetic-session'};
 const headers={'X-Actor-Id':actor.id,'X-Session-Binding':actor.sessionBinding};
 const makeRecord=(question:string,id=crypto.randomUUID())=>{const reading:Reading={version:1,id,createdAt:new Date().toISOString(),kind:'tarot',question,spread:'single',scenario:'general',cards:[{id:'major-star',reversed:false}]};return {id,reading,interpretation:basicInterpretation(reading),shared:false,ai:false,createdAt:reading.createdAt};};

@@ -1,4 +1,6 @@
 import {test,expect} from '@playwright/test';
+// Fault-injection routes must own their requests; the dedicated PWA suite keeps workers enabled.
+test.use({serviceWorkers:'block'});
 test.beforeEach(async({page})=>{await page.route('**/api/v1/me',route=>route.fulfill({status:401,json:{error:{message:'请先登录'}}}));});
 test('account modes discard passwords, keep visible labels and fit a narrow screen',async({page})=>{
  await page.setViewportSize({width:320,height:780});await page.goto('/account');
@@ -19,7 +21,7 @@ test('daylight account, navigation and public feature pages remain usable',async
  for(const path of ['/','/account','/space','/library','/iching']){
   await page.goto(path);await expect(page.locator('main h1:visible, main h2:visible').first()).toBeVisible();if(path==='/account')await expect(page.getByRole('button',{name:'登录',exact:true})).toBeVisible();
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
-  await page.screenshot({path:'test-results/luminous-'+(path==='/'?'home':path.slice(1))+'-'+info.project.name+'.png',fullPage:true,animations:'disabled'});
+  await page.screenshot({path:'test-results/luminous-'+(path==='/'?'home':path.slice(1))+'-'+info.project.name+'.png',fullPage:path!=='/library',animations:'disabled'});
  }
  await page.goto('/account');await page.getByRole('button',{name:'创建新账户',exact:true}).click();await expect(page.getByLabel('怎么称呼你')).toBeVisible();await page.screenshot({path:'test-results/luminous-signup-'+info.project.name+'.png',fullPage:true,animations:'disabled'});
  await page.getByRole('button',{name:'已有账户，登录',exact:true}).click();await page.getByRole('button',{name:'重新发送验证邮件',exact:true}).click();await expect(page.getByRole('button',{name:'发送验证邮件',exact:true})).toBeVisible();

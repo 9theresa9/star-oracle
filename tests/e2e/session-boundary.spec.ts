@@ -1,4 +1,6 @@
 import {test,expect} from './fixtures';
+// Fault-injection routes must own their requests; the dedicated PWA suite keeps workers enabled.
+test.use({serviceWorkers:'block'});
 const account=(id:string)=>({id,name:id,email:id+'@example.test',role:'user',twoFactorEnabled:false,sessionBinding:'session-'+id});
 test('two tabs revoke old private drafts before another account can save them',async({context,page})=>{
  let actor=account('account-A');const writes:any[]=[];

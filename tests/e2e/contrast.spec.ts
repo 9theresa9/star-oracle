@@ -1,4 +1,6 @@
 import {test,expect} from '@playwright/test';
+// Fault-injection routes must own their requests; the dedicated PWA suite keeps workers enabled.
+test.use({serviceWorkers:'block'});
 test('daylight public and account text meets normal-text contrast on its computed surfaces',async({page})=>{
  await page.route('**/api/v1/me',route=>route.fulfill({status:401,json:{error:{message:'Synthetic guest'}}}));
  for(const path of ['/','/account','/tarot','/iching','/space']){
