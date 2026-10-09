@@ -1,6 +1,0 @@
-# Synthetic SSH protocol fixture only; install from official PyPI.
-asyncssh==2.21.1
-cryptography==50.0.2
-cffi==2.1.1
-pycparser==3.1
-typing_extensions==4.16.0

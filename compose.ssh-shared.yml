@@ -1,0 +1,196 @@
+# Independent shared-MySQL profile. Use only its validated launcher.
+name: star-oracle-shared
+services:
+  redis:
+    restart: 'no'
+    security_opt: &id001
+    - no-new-privileges:true
+    labels:
+      io.star-oracle.deployment: ssh-shared
+    cpus: 1
+    pids_limit: 256
+    logging: &id002
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    image: redis:7.4
+    mem_limit: 192m
+    memswap_limit: 192m
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD}
+    command:
+    - sh
+    - -c
+    - exec redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy noeviction
+      --requirepass "$$REDIS_PASSWORD"
+    volumes:
+    - redis-data:/data
+    networks:
+      backend:
+        ipv4_address: 172.30.78.5
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - REDISCLI_AUTH=$$REDIS_PASSWORD redis-cli ping
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    read_only: true
+    cap_drop:
+    - ALL
+    tmpfs:
+    - /tmp
+    user: 999:999
+  migrate:
+    restart: 'no'
+    security_opt: *id001
+    labels:
+      io.star-oracle.deployment: ssh-shared
+    cpus: 1
+    pids_limit: 256
+    logging: *id002
+    image: star-oracle-api:local
+    read_only: true
+    tmpfs:
+    - /tmp
+    cap_drop:
+    - ALL
+    mem_limit: 512m
+    memswap_limit: 512m
+    environment:
+      DATABASE_URL: mysql://staroracle_migrator:${MYSQL_MIGRATION_PASSWORD:?Set MYSQL_MIGRATION_PASSWORD}@oracle-mysql:3306/staroracle?connection_limit=5
+      SHARED_MYSQL_UUID: ${SHARED_MYSQL_UUID:?Load approved private input}
+      SHARED_MYSQL_VERSION: ${SHARED_MYSQL_VERSION:?Load approved private input}
+    command:
+    - node
+    - apps/api/dist/maintenance/shared-entrypoint.js
+    - migrator
+    - migrate
+    networks:
+      backend:
+        ipv4_address: 172.30.78.6
+    user: 1000:1000
+  api:
+    restart: 'no'
+    security_opt: *id001
+    labels:
+      io.star-oracle.deployment: ssh-shared
+    cpus: 1
+    pids_limit: 256
+    logging: *id002
+    image: star-oracle-api:local
+    read_only: true
+    tmpfs:
+    - /tmp
+    cap_drop:
+    - ALL
+    mem_limit: 512m
+    memswap_limit: 512m
+    environment:
+      NODE_ENV: production
+      DEPLOYMENT_MODE: ssh-only
+      SSH_ONLY_CONTAINER: 'true'
+      PORT: '3001'
+      WEB_ORIGIN: http://localhost:17777
+      API_PUBLIC_URL: http://localhost:17777
+      TRUST_PROXY: 'false'
+      ADMIN_REQUIRE_2FA: 'true'
+      DATABASE_URL: mysql://staroracle_app:${MYSQL_PASSWORD:?Set MYSQL_PASSWORD}@oracle-mysql:3306/staroracle?connection_limit=5
+      REDIS_URL: redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD}@redis:6379
+      AUTH_SECRET: ${AUTH_SECRET:?Set AUTH_SECRET}
+      DATA_ENCRYPTION_KEY: ${DATA_ENCRYPTION_KEY:?Set DATA_ENCRYPTION_KEY}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_BASE_URL: ${AI_BASE_URL:-https://api.deepseek.com/v1}
+      AI_PROVIDER_NAME: ${AI_PROVIDER_NAME:-DeepSeek}
+      AI_MODEL: ${AI_MODEL:-deepseek-chat}
+      AI_DAILY_LIMIT: ${AI_DAILY_LIMIT:-200}
+      SHARED_MYSQL_UUID: ${SHARED_MYSQL_UUID:?Load approved private input}
+      SHARED_MYSQL_VERSION: ${SHARED_MYSQL_VERSION:?Load approved private input}
+    networks:
+      ssh:
+        ipv4_address: 172.30.77.2
+      backend:
+        ipv4_address: 172.30.78.2
+    healthcheck:
+      test:
+      - CMD
+      - node
+      - -e
+      - const r=require('node:http').get('http://127.0.0.1:3001/api/v1/health',{headers:{Host:'localhost:17777'},agent:false,timeout:4000},s=>{s.on('error',()=>{process.exitCode=1});s.resume();if(s.statusCode!==200)process.exitCode=1});r.on('timeout',()=>{process.exitCode=1;r.destroy()});r.on('error',()=>{process.exitCode=1})
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    user: 1000:1000
+    command:
+    - node
+    - apps/api/dist/maintenance/shared-entrypoint.js
+    - app
+    - serve
+  web:
+    restart: 'no'
+    security_opt: *id001
+    labels:
+      io.star-oracle.deployment: ssh-shared
+    cpus: 1
+    pids_limit: 256
+    logging: *id002
+    image: star-oracle-web:local
+    command:
+    - nginx
+    - -c
+    - /etc/nginx/ssh.conf
+    - -g
+    - daemon off;
+    mem_limit: 128m
+    memswap_limit: 128m
+    read_only: true
+    tmpfs:
+    - /tmp
+    cap_drop:
+    - ALL
+    ports:
+    - 127.0.0.1:17777:8080
+    networks:
+      ssh:
+        ipv4_address: 172.30.77.3
+    healthcheck:
+      test:
+      - CMD
+      - wget
+      - -q
+      - -O
+      - /dev/null
+      - '--header=Host: localhost:17777'
+      - http://127.0.0.1:8080/
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    user: 101:101
+networks:
+  ssh:
+    name: star-oracle-shared-edge
+    driver: bridge
+    enable_ipv6: false
+    driver_opts:
+      com.docker.network.bridge.host_binding_ipv4: 127.0.0.1
+      com.docker.network.bridge.gateway_mode_ipv4: nat
+    ipam:
+      config:
+      - subnet: 172.30.77.0/24
+        gateway: 172.30.77.1
+  backend:
+    name: star-oracle-shared-backend
+    driver: bridge
+    internal: true
+    enable_ipv6: false
+    driver_opts:
+      com.docker.network.bridge.host_binding_ipv4: 127.0.0.1
+      com.docker.network.bridge.gateway_mode_ipv4: nat
+    ipam:
+      config:
+      - subnet: 172.30.78.0/24
+        gateway: 172.30.78.1
+volumes:
+  redis-data:
+    name: star-oracle-shared-redis-data

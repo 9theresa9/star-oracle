@@ -1,0 +1,91 @@
+name: Shared MySQL SSH verification
+on:
+  workflow_dispatch:
+  pull_request:
+    paths: ['apps/**', 'packages/**', 'compose.ssh-shared.yml', 'infra/**', 'tests/**', 'package*.json', 'scripts/**', 'docs/**', '.env.ssh-shared.example', '.github/workflows/ssh-shared-verify.yml']
+  push:
+    branches: [feat/comprehensive-oracle]
+permissions:
+  contents: read
+concurrency:
+  group: ssh-shared-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  synthetic-shared-mysql:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      CI: 'true'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install Docker Engine from the official stable Ubuntu repository
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y ca-certificates curl age
+          sudo install -m 0755 -d /etc/apt/keyrings
+          sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+          sudo chmod a+r /etc/apt/keyrings/docker.asc
+          . /etc/os-release
+          printf '%s\n' "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $VERSION_CODENAME stable" | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
+          sudo apt-get update -qq
+          # This is an empty disposable runner, never an operator's host.
+          conflicts=()
+          for package in docker.io docker-compose docker-compose-v2 docker-doc podman-docker containerd runc; do
+            if dpkg-query -W -f='${Status}' "$package" 2>/dev/null | grep -q '^install ok installed$'; then
+              conflicts+=("$package")
+            fi
+          done
+          if ((${#conflicts[@]})); then sudo apt-get remove -y "${conflicts[@]}"; fi
+          sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+          sudo systemctl start docker
+          docker version --format '{{.Server.Version}}' > "$RUNNER_TEMP/shared-engine-version.txt"
+          node --input-type=module -e 'import {validateEngine} from "./scripts/ssh-deploy.mjs"; import {readFileSync} from "node:fs"; validateEngine(readFileSync(process.env.RUNNER_TEMP+"/shared-engine-version.txt","utf8").trim());'
+      - run: npm ci
+      - run: npm run db:generate
+      - run: npm run typecheck
+      - name: Run configuration, database policy, release and original unit regressions
+        run: node --test tests/*.test.js
+      - name: Build actual release images once
+        run: |
+          docker build --pull --provenance=false -f apps/api/Dockerfile -t star-oracle-api:local .
+          docker build --pull --provenance=false -f apps/web/Dockerfile -t star-oracle-web:local .
+          docker build --pull --provenance=false -f infra/mysql-client.Dockerfile -t star-oracle-mysql-client:local .
+          docker pull redis:7.4
+          # This server is solely the synthetic externally owned fixture.
+          # The release image inventory excludes it.
+          docker pull mysql:8.4
+      - run: npx playwright install --with-deps chromium webkit
+      - name: Verify actual shared stack, boundaries, browsers and encrypted candidate recovery
+        run: node scripts/ssh-shared-smoke.mjs --proof "$RUNNER_TEMP/ssh-shared-verified-images.json"
+      - name: Export and verify the exact tested offline release
+        run: |
+          node scripts/ssh-shared-release.mjs pack "$RUNNER_TEMP/star-oracle-shared" --proof "$RUNNER_TEMP/ssh-shared-verified-images.json"
+          node scripts/ssh-shared-release.mjs verify "$RUNNER_TEMP/star-oracle-shared"
+          node scripts/ssh-shared-release.mjs load "$RUNNER_TEMP/star-oracle-shared"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: success()
+        with:
+          name: star-oracle-shared-linux-amd64-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/star-oracle-shared/
+          include-hidden-files: true
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: shared-synthetic-browser-review
+          path: |
+            test-results/ssh-shared/**/*.png
+            ${{ runner.temp }}/shared-engine-version.txt
+          if-no-files-found: ignore
+          retention-days: 7

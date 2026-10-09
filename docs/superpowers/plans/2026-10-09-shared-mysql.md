@@ -1,0 +1,9 @@
+# Shared MySQL SSH profile implementation
+
+Approved scope: add an opt-in, fail-closed profile with an externally owned MySQL 8.4 instance, dedicated Redis and existing SSH-only application controls. Runtime metadata is supplied privately and compared with actual Docker/SQL observations. No real deployment or credential provisioning is part of implementation.
+
+1. Write failing policy tests for missing/malformed deployment input, private-file requirements, precise external container/network identity, wrong ports/routes/grants, and standing resource total. Implement separate policy and Compose files; preserve existing profiles.
+2. Write failing lifecycle tests proving no external lifecycle/network mutation, prepare-before-attachment bootstrap, create-without-recreate, explicit start excluding migration, and one kernel lock spanning every mutation/maintenance pipeline. Implement shared launcher and bounded own-worker cleanup.
+3. Write failing pure SQL identity/grant tests and opt-in API/migrator/maintenance entrypoints. Verify roles from their actual source IPs. Implement a pinned official client-only image, minimum-privilege encrypted export and authenticated, empty-candidate-only restore with fresh Redis and offline validation.
+4. Write failing release inventory/proof tests. Implement a four-image shared bundle without a MySQL server image, plus a synthetic Docker >=28 fixture with independent sample schema/data and actual network/permissions/resource checks. Run existing real browser scenarios against the shared application.
+5. Independently review the final diff, scan for secrets, run applicable unit/API/type/build/browser/Docker/backup/recovery tests, publish only generic source and synthetic fixtures to the authorized branch, and follow exact-head CI through terminal results. Preserve original profiles and their regression CI. Do not publish private host inventory/maintenance information.
