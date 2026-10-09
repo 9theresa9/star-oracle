@@ -117,7 +117,9 @@ test('saved explorations, private calendar, actions, reviews and export survive 
    console.log('PERSONAL_STAGE '+info.project.name+' session-request-held');
    await sessionBarrier;
    await route.continue();
-  },{times:1});
+  });
+  // StrictMode cancels the initial signal-aware query and may issue a replacement.
+  // Hold every /me response until release, rather than only the cancelled request.
   try{
    await test.step('页面可交互时观察未完成的真实会话请求',async()=>{
     console.log('PERSONAL_STAGE '+info.project.name+' tarot-navigation-start');

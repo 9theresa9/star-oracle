@@ -6,6 +6,7 @@ if [ -f .env.production ]; then echo 'Refusing an existing .env.production; run 
 export COMPOSE_PROJECT_NAME="star-oracle-smoke-$(date +%s)-$$"
 cleanup() {
   smoke_status=$?
+  if [ -n "${gateway_probe:-}" ]; then docker rm -f "$gateway_probe" >/dev/null 2>&1 || true; fi
   if [ "$smoke_status" -ne 0 ] && [ -f .env.production ]; then
     node --input-type=module - <<'JS'
 import {readFileSync} from 'node:fs';
@@ -39,6 +40,18 @@ JS
 docker compose --env-file .env.production config --quiet
 docker compose --env-file .env.production build api web
 docker run --rm -e DOMAIN=oracle.test -e TLS_EMAIL=ci@example.com -v "$PWD/infra/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2.10-alpine caddy validate --config /etc/caddy/Caddyfile
+# Probe a proxy failure in a network-isolated container with no TLS issuance.
+# Only this synthetic test overrides DOMAIN to a local HTTP listener.
+gateway_probe="${COMPOSE_PROJECT_NAME}-gateway-log-probe"
+docker run -d --name "$gateway_probe" --network none -e DOMAIN=http://127.0.0.1:8080 -e TLS_EMAIL=ci@example.com -v "$PWD/infra/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2.10-alpine >/dev/null
+for i in $(seq 1 30); do
+  if docker exec "$gateway_probe" wget -S -O /dev/null --header='Referer: http://127.0.0.1:8080/account?token=GATEWAY_LOG_SENTINEL' 'http://127.0.0.1:8080/account?token=GATEWAY_LOG_SENTINEL' 2>&1 | grep -q '502 Bad Gateway'; then break; fi
+  sleep 1
+done
+gateway_logs="$(docker logs "$gateway_probe" 2>&1)"
+if printf '%s' "$gateway_logs" | grep -q GATEWAY_LOG_SENTINEL; then echo 'Sensitive request reached gateway error logs' >&2; exit 1; fi
+if ! printf '%s' "$gateway_logs" | grep -q 'http.log.error'; then echo 'Gateway failure probe did not exercise error logging' >&2; exit 1; fi
+docker rm -f "$gateway_probe" >/dev/null;gateway_probe=
 docker compose --env-file .env.production up -d --wait mysql redis api web
 docker compose --env-file .env.production exec -T api node --input-type=module - <<'JS'
 const response=await fetch('http://127.0.0.1:3001/api/v1/health');

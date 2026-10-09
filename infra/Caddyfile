@@ -1,5 +1,14 @@
 {
   email {$TLS_EMAIL}
+  # Runtime proxy errors can contain request URLs even without access logging.
+  log {
+    format filter {
+      wrap json
+      fields {
+        request delete
+      }
+    }
+  }
 }
 {$DOMAIN} {
   encode zstd gzip

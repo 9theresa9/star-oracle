@@ -198,3 +198,8 @@ test('production and development services have bounded Docker log retention', ()
     }
   }
 });
+
+test('gateway runtime error logs remove request URLs and headers too',()=>{
+ const caddy=readFileSync(join(root,'infra/Caddyfile'),'utf8');
+ assert.match(caddy,/log\s*\{[\s\S]*format filter\s*\{[\s\S]*request delete/);
+});

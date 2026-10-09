@@ -106,3 +106,5 @@ candidate=(docker compose --project-name "$project" --env-file "$ENV_FILE" \
 ## 安全事件
 
 撤销涉及账户 session，轮换已泄漏的认证/模型/SMTP 凭据；隔离流量、保留无正文审计和相关运维证据。涉及数据加密密钥时先确定备份与迁移方案，不能仅改环境变量造成全部旧数据无法解密。随后验证跨用户访问与权限失效，并记录用户影响与处置结果。
+
+网关的 runtime proxy error 也可能携带完整 request；`infra/Caddyfile` 对默认 logger 使用 filter 删除整个 request 对象，保留错误类别/status。CI 在无网络的独立 Caddy 容器内产生虚拟 token 的 502 请求并断言日志不包含 token；这不会申请 TLS 或公开服务。配置依据：[Caddy 全局日志](https://caddyserver.com/docs/caddyfile/options#log)与[字段过滤](https://caddyserver.com/docs/caddyfile/directives/log#filter)。
