@@ -85,6 +85,7 @@ jobs:
       - name: Verify protocol fixture catches host-key and path regressions
         run: python tests/ssh-socket-probe/windows-probe.test.py
       - name: Stock Windows ssh.exe TCP-to-remote-Unix protocol and HTTP assertion
+        if: ${{ !cancelled() }}
         run: python tests/ssh-socket-probe/run-windows.py --output "$env:RUNNER_TEMP/ssh-socket-windows.json"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()

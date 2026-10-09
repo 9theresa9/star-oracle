@@ -20,14 +20,18 @@ class WindowsProtocolProbeTests(unittest.TestCase):
                 [sys.executable, str(SCRIPT), '--output', str(report), *args],
                 capture_output=True, text=True, timeout=75,
             )
-            self.assertTrue(report.exists(), result.stderr)
+            self.assertTrue(report.exists(), {'stdout': result.stdout, 'stderr': result.stderr})
             return result, json.loads(report.read_text())
 
     def test_real_ssh_http_and_exact_streamlocal_destination(self):
         args = [] if os.name == 'nt' else ['--allow-non-windows']
         result, report = self.run_probe(*args)
-        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.returncode, 0, {'report': report, 'stderr': result.stderr})
         self.assertEqual(report['status'], 'passed')
+        expected_commit = subprocess.check_output(
+            ['git', 'rev-parse', 'HEAD'], cwd=SCRIPT.resolve().parents[2], text=True, timeout=5,
+        ).strip()
+        self.assertEqual(report['commit'], expected_commit)
         self.assertEqual(report['windowsNativeTest'], os.name == 'nt')
         self.assertEqual(report['http']['status'], 200)
         self.assertEqual(report['http']['body'], 'synthetic-streamlocal-ok\n')

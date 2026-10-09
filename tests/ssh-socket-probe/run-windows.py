@@ -261,10 +261,19 @@ def main():
         'status': 'failed', 'windowsNativeTest': os.name == 'nt',
         'scope': 'Native Windows SSH protocol against mock SSH server' if os.name == 'nt' else 'Non-Windows fixture self-check against mock SSH server',
         'platform': sys.platform, 'python': sys.version.split()[0], 'asyncssh': asyncssh.__version__,
-        'commit': os.environ.get('GITHUB_SHA'),
+        'commit': None,
         'notProven': ['Real Linux SSH server or Unix socket', 'Windows-to-real-Linux/Nginx/Node end-to-end or full application',
                       'Other Windows SSH versions', 'Production server or user accounts'],
     }
+    try:
+        # PR event GITHUB_SHA can name a merge commit while checkout tests the
+        # PR head. Resolve provenance from the checkout containing this script.
+        proof['commit'] = subprocess.check_output(
+            ['git', 'rev-parse', '--verify', 'HEAD'], cwd=Path(__file__).resolve().parents[2],
+            text=True, stderr=subprocess.DEVNULL, timeout=5,
+        ).strip()
+    except (OSError, subprocess.SubprocessError):
+        pass
     try:
         executable = ssh_executable(args.allow_non_windows)
         proof['sshExecutable'] = str(executable)
