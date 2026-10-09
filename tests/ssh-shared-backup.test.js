@@ -14,7 +14,7 @@ function fixture(){
  return {context,outputFile:join(privateDir,'backup.sql.gz.age'),recipient:'age1'+'a'.repeat(58),close:()=>rmSync(privateDir,{recursive:true,force:true})};
 }
 function processes(fail){return (binary,args,options)=>{
- if(binary==='docker'){assert.ok(args.includes('mysqldump'));const envFile=args[args.indexOf('--env-file')+1];assert.equal(readFileSync(envFile,'utf8'),'MYSQL_PWD='+'1'.repeat(64)+'\n');return spawn(process.execPath,['-e',"process.stdout.write('CREATE TABLE synthetic (id INT);\\n'); process.exitCode="+(fail==='dump'?1:0)],options);}
+ if(binary==='docker'){assert.ok(args.includes('mysqldump'));assert.ok(!args.includes('--connect-timeout=10'));assert.equal(options.timeout,30*60*1000);assert.equal(options.stdio[2],'ignore');const envFile=args[args.indexOf('--env-file')+1];assert.equal(readFileSync(envFile,'utf8'),'MYSQL_PWD='+'1'.repeat(64)+'\n');return spawn(process.execPath,['-e',"process.stdout.write('CREATE TABLE synthetic (id INT);\\n'); process.exitCode="+(fail==='dump'?1:0)],options);}
  assert.equal(binary,'age');assert.equal(args[0],'-r');
  return spawn(process.execPath,['-e',"process.stdin.pipe(process.stdout); process.stdin.on('end',()=>{process.exitCode="+(fail==='age'?1:0)+"});"],options);
 };}
@@ -24,7 +24,7 @@ test('encrypted publication waits for every pipeline stage and creates only a pr
 });
 test('failed dump or encryption never publishes even when downstream produces complete-looking output',async()=>{
  assert.equal(typeof backup.createEncryptedBackup,'function');
- for(const fail of ['dump','age']){const f=fixture();try{await assert.rejects(backup.createEncryptedBackup({...f,spawnProcess:processes(fail)}),error=>error.message==='SHARED_BACKUP_FAILED');assert.equal(existsSync(f.outputFile),false);assert.deepEqual(readdirSync(f.context.privateDir),[]);}finally{f.close();}}
+ for(const [fail,code] of [['dump','SHARED_BACKUP_DUMP_FAILED'],['age','SHARED_BACKUP_ENCRYPT_FAILED']]){const f=fixture();try{await assert.rejects(backup.createEncryptedBackup({...f,spawnProcess:processes(fail)}),error=>error.message===code);assert.equal(existsSync(f.outputFile),false);assert.deepEqual(readdirSync(f.context.privateDir),[]);}finally{f.close();}}
 });
 test('backup rejects missing trusted audit invalid recipient and existing destination before DB contact',async()=>{
  assert.equal(typeof backup.createEncryptedBackup,'function');
@@ -33,5 +33,18 @@ test('backup rejects missing trusted audit invalid recipient and existing destin
 test('backup abort closes both stages and removes unpublished ciphertext before rejecting',async()=>{
  const f=fixture(),controller=new AbortController();f.context.signal=controller.signal;
  const spawnProcess=(binary,args,options)=>{const child=binary==='docker'?spawn(process.execPath,['-e',"process.stdout.write('some SQL');setTimeout(()=>process.exit(0),200)"],options):spawn(process.execPath,['-e',"process.stdin.pipe(process.stdout)"],options);return child;};
- try{const work=backup.createEncryptedBackup({...f,spawnProcess});setTimeout(()=>controller.abort(),20);await assert.rejects(work,/SHARED_BACKUP_FAILED/);assert.equal(existsSync(f.outputFile),false);assert.deepEqual(readdirSync(f.context.privateDir),[]);}finally{f.close();}
+ try{const work=backup.createEncryptedBackup({...f,spawnProcess});setTimeout(()=>controller.abort(),20);await assert.rejects(work,/^Error: SHARED_BACKUP_(DUMP|ENCRYPT|PIPE|WRITE)_FAILED$/);assert.equal(existsSync(f.outputFile),false);assert.deepEqual(readdirSync(f.context.privateDir),[]);}finally{f.close();}
+});
+test('pipeline and publication failures retain only fixed diagnostics and never overwrite a competing artifact',async()=>{
+ for(const [mode,code] of [['pipe','SHARED_BACKUP_PIPE_FAILED'],['publish','SHARED_BACKUP_PUBLISH_FAILED']]){
+  const f=fixture(),normal=processes();
+  const spawnProcess=(name,args,options)=>{const child=normal(name,args,options);if(mode==='pipe'&&name==='docker')queueMicrotask(()=>child.stdout.destroy(new Error('PRIVATE_SQL_PASSWORD_STDERR')));if(mode==='publish'&&name==='age')writeFileSync(f.outputFile,'original',{mode:0o600});return child;};
+  try{await assert.rejects(backup.createEncryptedBackup({...f,spawnProcess}),error=>error.message===code);if(mode==='publish'){assert.equal(readFileSync(f.outputFile,'utf8'),'original');assert.deepEqual(readdirSync(f.context.privateDir),['backup.sql.gz.age']);}else assert.deepEqual(readdirSync(f.context.privateDir),[]);}finally{f.close();}
+ }
+});
+test('spawn failures expose only a fixed stage code and clean all private files',async()=>{
+ for(const [binary,code] of [['docker','SHARED_BACKUP_DUMP_FAILED'],['age','SHARED_BACKUP_ENCRYPT_FAILED']]){
+  const f=fixture();const normal=processes();
+  try{await assert.rejects(backup.createEncryptedBackup({...f,spawnProcess:(name,args,options)=>{if(name===binary)throw new Error('PRIVATE_SQL_PASSWORD_STDERR');return normal(name,args,options);}}),error=>error.message===code);assert.equal(existsSync(f.outputFile),false);assert.deepEqual(readdirSync(f.context.privateDir),[]);}finally{f.close();}
+ }
 });

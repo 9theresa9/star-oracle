@@ -48,6 +48,11 @@ test('trusted provisioning audit is explicit and complete; restricted metadata i
 });
 const hostPath='../scripts/ssh-shared-db.mjs';
 const host=existsSync(new URL(hostPath,import.meta.url))?await import(hostPath):{};
+test('mysqldump excludes the mysql-only connect-timeout option while query clients keep it',()=>{
+ const base={role:'backup',envFile:'/private/role.env',imageId:'sha256:'+'a'.repeat(64)};
+ assert.ok(!host.mysqlClientArguments({...base,sqlMode:'dump'}).includes('--connect-timeout=10'));
+ for(const sqlMode of ['probe','empty','import'])assert.ok(host.mysqlClientArguments({...base,sqlMode,...(sqlMode==='probe'?{}:{role:'candidateImporter',database:'staroraclerestoretest'})}).includes('--connect-timeout=10'));
+});
 test('client arguments pin source and image, expose only password-file path and harden mysql import', () => {
  assert.equal(typeof host.mysqlClientArguments,'function');
  const imageId='sha256:'+'a'.repeat(64);

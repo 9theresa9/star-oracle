@@ -16,9 +16,11 @@ export function mysqlClientArguments({role,envFile,imageId,sqlMode,database='sta
   '--network=star-oracle-shared-backend','--ip=172.30.78.7','--read-only','--tmpfs=/tmp:rw,noexec,nosuid,size=16777216',
   '--cap-drop=ALL','--security-opt=no-new-privileges:true','--user=10001:10001','--memory=128m','--memory-swap=128m','--pids-limit=128','--cpus=1',
   '--env-file',envFile,imageId,sqlMode==='dump'?'mysqldump':'mysql','--no-defaults','--no-login-paths','--protocol=TCP','--host=oracle-mysql','--port=3306',
-  '--user='+expected.user,'--connect-timeout=10','--ssl-mode=REQUIRED','--default-character-set=utf8mb4'];
+  '--user='+expected.user,'--ssl-mode=REQUIRED','--default-character-set=utf8mb4'];
  if(sqlMode==='dump')return [...args,'--single-transaction','--quick','--no-tablespaces','--set-gtid-purged=OFF','--skip-triggers','--skip-lock-tables','--skip-add-drop-table','--skip-add-locks','--skip-disable-keys','--column-statistics=0','--hex-blob',database];
- args.push('--binary-mode=1','--local-infile=0','--skip-reconnect','--batch','--raw','--skip-column-names','--database='+database);
+ // MySQL 8.4 mysqldump has no connect-timeout option; its host process has a
+ // bounded overall timeout. Keep the mysql-only option on query/import clients.
+ args.push('--connect-timeout=10','--binary-mode=1','--local-infile=0','--skip-reconnect','--batch','--raw','--skip-column-names','--database='+database);
  if(sqlMode==='probe')args.push('--execute',identityJsonQuery+'; SHOW GRANTS;');
  if(sqlMode==='empty')args.push('--execute','SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE();');
  return args;
