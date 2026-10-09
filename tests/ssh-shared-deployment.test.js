@@ -20,6 +20,45 @@ test('external MySQL bootstrap and attached phases pin originals without acquiri
  for(const change of [x=>x.Id='c'.repeat(64),x=>x.Image=`sha256:${'a'.repeat(64)}`,x=>x.State.Running=false,x=>x.HostConfig.Privileged=true,x=>x.HostConfig.NetworkMode='host',x=>x.HostConfig.PortBindings={'3306/tcp':[{HostIp:'0.0.0.0',HostPort:'3306'}]},x=>x.NetworkSettings.Networks['star-oracle-shared-backend'].IPAddress='172.30.78.9',x=>x.NetworkSettings.Networks['star-oracle-shared-backend'].Aliases=[],x=>x.NetworkSettings.Networks['synthetic-existing-mysql'].NetworkID='0'.repeat(64),x=>x.NetworkSettings.Networks['synthetic-existing-mysql'].Gateway='172.28.91.9',x=>x.NetworkSettings.Networks.public={IPAddress:'10.0.0.1'},x=>x.Config.Labels['com.docker.compose.project']='star-oracle-shared']){const external=sharedExternal(input);change(external);assert.throws(()=>validateExternalMysql(external,input,{phase:'attached',backendId:'b'.repeat(64)}));}
 });
 
+test('original Docker aliases retain legal duplicates and compare exact multiplicities in both phases',async()=>{
+ const {validateInput,validateExternalMysql}=await implementation(),input=sharedInput();
+ const original=input.externalMysql.originalNetworks[0];
+ original.aliases=['synthetic-db-container','synthetic-db','synthetic-db','dddddddddddd'];
+ const before=structuredClone(input);
+ assert.deepEqual(validateInput(input),before);
+ for(const attached of [false,true]){
+  const options={phase:attached?'attached':'prepare',backendId:'b'.repeat(64)};
+  const external=structuredClone(sharedExternal(input,attached));
+  assert.doesNotThrow(()=>validateExternalMysql(external,input,options));
+  external.NetworkSettings.Networks[original.name].Aliases.reverse();
+  assert.doesNotThrow(()=>validateExternalMysql(external,input,options),'order alone is not endpoint drift');
+  assert.deepEqual(input,before,'validation must not normalize or mutate the private inventory');
+  const changedLists=[
+   ['synthetic-db-container','synthetic-db','dddddddddddd'],
+   [...original.aliases,'synthetic-db'],
+   ['synthetic-db-container','synthetic-db-container','synthetic-db','dddddddddddd'],
+   [...original.aliases,'unexpected-alias'],
+   ['synthetic-db-container','synthetic-db','different-db','dddddddddddd'],
+  ];
+  for(const aliases of changedLists){
+   const changed=structuredClone(external);changed.NetworkSettings.Networks[original.name].Aliases=aliases;
+   assert.throws(()=>validateExternalMysql(changed,input,options),/original external network endpoint changed/);
+  }
+  const missing=structuredClone(external);delete missing.NetworkSettings.Networks[original.name].Aliases;
+  assert.throws(()=>validateExternalMysql(missing,input,options),/original external network endpoint changed/);
+ }
+});
+
+test('duplicate alias compatibility preserves syntax and inventory size limits',async()=>{
+ const {validateInput}=await implementation();
+ const valid=sharedInput();valid.externalMysql.originalNetworks[0].aliases=Array(16).fill('synthetic-db');
+ assert.doesNotThrow(()=>validateInput(valid));
+ for(const aliases of [Array(17).fill('synthetic-db'),['valid',''],['valid',' space'],['valid','--flag'],['valid','a/b'],['valid',null],['valid',7],'synthetic-db']){
+  const input=sharedInput();input.externalMysql.originalNetworks[0].aliases=aliases;
+  assert.throws(()=>validateInput(input),/invalid original aliases/);
+ }
+});
+
 test('shared private input and secret parser reject public files, symlinks and overrides; preserve original auth bytes',async t=>{
  const {loadInput,loadSharedSettings}=await implementation();
  const dir=mkdtempSync(join(tmpdir(),'shared-input-'));t.after(()=>rmSync(dir,{recursive:true,force:true}));

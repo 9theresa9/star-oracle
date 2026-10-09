@@ -38,7 +38,9 @@ export function validateInput(input){
   const [first,last]=cidrRange(n.ipv4Address,n.prefixLength);
   assertPolicy(!['172.30.77.0','172.30.78.0'].some(ip=>{const start=ipv4Number(ip);return first<=start+255&&last>=start;}),'original network overlaps the fixed SSH topology');
   assertPolicy(!n.gateway||ipv4Number(n.gateway)>=first&&ipv4Number(n.gateway)<=last,'original gateway outside its network');
-  assertPolicy(Array.isArray(n.aliases)&&n.aliases.length<=16&&n.aliases.every(name)&&new Set(n.aliases).size===n.aliases.length,'invalid original aliases');
+  // Docker may retain duplicate aliases. Preserve their multiplicities so the
+  // live endpoint comparison below can still detect any inventory change.
+  assertPolicy(Array.isArray(n.aliases)&&n.aliases.length<=16&&n.aliases.every(name),'invalid original aliases');
  }
  const route=x.defaultRoute;
  assertPolicy(route===null||exactKeys(route,['gateway','interface'])&&privateIp(route.gateway)&&/^[a-zA-Z0-9_.-]{1,15}$/.test(route.interface)&&x.originalNetworks.some(n=>n.gateway===route.gateway),'explicit original default route required');
