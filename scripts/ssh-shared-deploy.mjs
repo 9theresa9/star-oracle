@@ -40,7 +40,7 @@ const policyDiagnostics=new Map([
  'application secret/cache configuration differs','application environment override','exactly four owned containers required',
  'unknown or duplicate owned service','actual container name differs','runtime image differs from release',
  'actual user/command/entrypoint changed','actual migration healthcheck changed','actual healthcheck changed',
- 'actual environment differs','actual host isolation differs','actual security settings changed','actual resources differ',
+ 'actual environment differs','actual host isolation differs','actual security settings changed','actual volume binding differs','actual resources differ',
  'actual log rotation differs','unreviewed actual mount','actual web publication changed','unpublished service has a port',
  'actual runtime publication changed','actual service network inventory changed','actual service peer changed',
  'actual service DNS aliases changed','exact owned network inventory required','actual network differs',

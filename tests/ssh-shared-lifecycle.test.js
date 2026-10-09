@@ -5,7 +5,7 @@ import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {sharedInput, sharedExternal, sharedSettings, sha} from './fixtures/ssh-shared.mjs';
-import {PROJECT, EDGE, BACKEND, IMAGES, NETWORKS, NETWORK_OPTIONS, SERVICES, HEALTH_TESTS} from '../scripts/ssh-shared-policy.mjs';
+import {PROJECT, EDGE, BACKEND, IMAGES, NETWORKS, NETWORK_OPTIONS, SERVICES, HEALTH_TESTS, validateSharedContainers} from '../scripts/ssh-shared-policy.mjs';
 import {mysqlClientArguments} from '../scripts/ssh-shared-db.mjs';
 
 const root=resolve(import.meta.dirname,'..');
@@ -113,6 +113,21 @@ test('prepare rejects a pre-existing bind-backed or unowned Redis volume before 
 }));
 test('new Redis volume is verified again immediately after create',()=>locked(async()=>{
  const f=fixture({prepared:false,attached:false}),{runSharedDeployment}=await launcher();f.state.afterCreate=()=>{f.state.volume.Driver='foreign-driver';};await assert.rejects(runSharedDeployment({...f,action:'prepare'}));assert.ok(!f.state.commands.some(a=>a[2]==='start'));
+}));
+test('Compose canonical named-volume Binds is accepted only for the exact verified Redis volume',()=>{
+ const f=fixture(),redis=f.service('redis'),canonical=PROJECT+'-redis-data:/data:rw';redis.HostConfig.Binds=[canonical];
+ assert.doesNotThrow(()=>validateSharedContainers(f.state.owned,f.config,f.manifest,f.images));
+ for(const bindings of [['/private:/data:rw'],['foreign-volume:/data:rw'],[PROJECT+'-redis-data:/other:rw'],[PROJECT+'-redis-data:/data:ro'],[canonical+',z'],[PROJECT+'-redis-data:/data'],[canonical,canonical],[canonical,'/var/run/docker.sock:/socket:rw']]){
+  redis.HostConfig.Binds=bindings;assert.throws(()=>validateSharedContainers(f.state.owned,f.config,f.manifest,f.images));
+ }
+ redis.HostConfig.Binds=[canonical];
+ for(const name of ['api','web','migrate']){f.service(name).HostConfig.Binds=[canonical];assert.throws(()=>validateSharedContainers(f.state.owned,f.config,f.manifest,f.images));delete f.service(name).HostConfig.Binds;}
+ for(const change of [m=>m.Type='bind',m=>m.Name='foreign-volume',m=>m.RW=false,m=>m.Destination='/other']){const original=clone(redis.Mounts);change(redis.Mounts[0]);assert.throws(()=>validateSharedContainers(f.state.owned,f.config,f.manifest,f.images));redis.Mounts=original;}
+});
+test('prepare and start accept Compose named-volume serialization while preserving volume checks',()=>locked(async()=>{
+ const {runSharedDeployment}=await launcher(),f=fixture({prepared:false,attached:false});f.state.afterCreate=()=>{f.service('redis').HostConfig.Binds=[PROJECT+'-redis-data:/data:rw'];};
+ await runSharedDeployment({...f,action:'prepare'});Object.assign(f.state.external,sharedExternal(f.input,true));await runSharedDeployment({...f,action:'start'});assert.equal(f.service('redis').State.Health.Status,'healthy');
+ f.state.volume.Options={type:'none',o:'bind',device:'/private'};await assert.rejects(runSharedDeployment({...f,action:'check'}),/SHARED_REDIS_VOLUME/);assert.equal(f.service('api').State.Running,false);
 }));
 test('wrong original external metadata rejects prepare before own resources are created',()=>locked(async()=>{
  const f=fixture({prepared:false,attached:false}),{runSharedDeployment}=await launcher();f.state.external.Image='sha256:'+sha('0');await assert.rejects(runSharedDeployment({...f,action:'prepare'}));assert.equal(mutators(f.state.commands).length,0);

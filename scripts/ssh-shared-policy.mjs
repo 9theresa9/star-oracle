@@ -138,7 +138,12 @@ export function validateSharedContainers(containers,config,manifest,images,{allo
   assertPolicy(exactKeys(actualEnv,Object.keys(expectedEnv))&&Object.entries(expectedEnv).every(([k,v])=>actualEnv[k]===String(v)),'actual environment differs');
   const h=c.HostConfig,n=c.NetworkSettings;
   assertPolicy(serviceNetworks(name).some(k=>h.NetworkMode===NETWORKS[k].name)&&!h.Privileged&&!h.PublishAllPorts&&!h.CapAdd?.length&&!h.Devices?.length&&!h.DeviceRequests?.length&&!h.PidMode&&(!h.IpcMode||h.IpcMode==='private')&&!h.UsernsMode&&!h.ExtraHosts?.length&&!h.Dns?.length&&!h.DnsSearch?.length&&!h.DnsOptions?.length&&!Object.keys(h.Sysctls??{}).length,'actual host isolation differs');
-  assertPolicy(h.ReadonlyRootfs===true&&exactKeys(h.Tmpfs,['/tmp'])&&h.Tmpfs['/tmp']===''&&same(h.CapDrop,['ALL'])&&h.SecurityOpt?.length===1&&['no-new-privileges:true','no-new-privileges'].includes(h.SecurityOpt[0])&&!h.Binds?.length&&h.RestartPolicy?.Name==='no','actual security settings changed');
+  assertPolicy(h.ReadonlyRootfs===true&&exactKeys(h.Tmpfs,['/tmp'])&&h.Tmpfs['/tmp']===''&&same(h.CapDrop,['ALL'])&&h.SecurityOpt?.length===1&&['no-new-privileges:true','no-new-privileges'].includes(h.SecurityOpt[0])&&h.RestartPolicy?.Name==='no','actual security settings changed');
+  // Compose uses the legacy Binds API for ordinary named volumes too:
+  // https://github.com/docker/compose/blob/v5.6.0/pkg/compose/create.go#L931-L1002
+  // Accept only that exact Redis serialization; resolved Mounts and the
+  // launcher's owned local-volume inspection remain independent requirements.
+  assertPolicy(same(h.Binds??[],[])||name==='redis'&&same(h.Binds,[`${PROJECT}-redis-data:/data:rw`]),'actual volume binding differs');
   assertPolicy(h.Memory===w.memory&&h.MemorySwap===w.memory&&h.NanoCpus===1e9&&h.PidsLimit===256,'actual resources differ');
   assertPolicy(h.LogConfig?.Type==='json-file'&&h.LogConfig.Config?.['max-size']==='10m'&&h.LogConfig.Config?.['max-file']==='3','actual log rotation differs');
   const mounts=c.Mounts??[];
