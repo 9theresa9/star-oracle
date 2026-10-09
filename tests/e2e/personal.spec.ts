@@ -1,6 +1,7 @@
 import { test,expect,type Page,type Response,type TestInfo } from './fixtures';
 import { PrismaClient } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
+import {provisionBrowserAccount} from './fixtures/accounts';
 
 // This flow delays a real network request; service workers must not bypass its route.
 // Dedicated PWA tests keep their own worker behavior enabled.
@@ -74,7 +75,7 @@ test('saved explorations, private calendar, actions, reviews and export survive 
  test.setTimeout(90000);
  const fixtureURL=new URL(process.env.DATABASE_URL??'mysql://invalid');
  if(process.env.NODE_ENV!=='test'||!['localhost','127.0.0.1','[::1]'].includes(fixtureURL.hostname)||fixtureURL.pathname!=='/star_oracle')throw new Error('Private review fixtures require the isolated loopback test database.');
- const email='personal-'+info.project.name+'-'+Date.now()+'@example.com';
+ const username='synthetic-personal-'+randomUUID().replaceAll('-','').slice(0,12);
  const password='journey-test-password-123';
  const question='我如何把这次领悟转化成一个可以尝试的小行动？';
  const note='记得先做一件很小的事。';
@@ -83,18 +84,11 @@ test('saved explorations, private calendar, actions, reviews and export survive 
  page.on('request',request=>{if(request.method()==='GET'){const path=new URL(request.url()).pathname;getCounts.set(path,(getCounts.get(path)??0)+1);}});
  const gets=(path:string)=>getCounts.get(path)??0;
 
+ await provisionBrowserAccount(username,'星空旅人',password);
  await page.goto('/account');
- await page.getByRole('button',{name:'创建新账户',exact:true}).click();
- await page.getByLabel('怎么称呼你',{exact:true}).fill('星空旅人');
- await page.getByLabel('邮箱',{exact:true}).fill(email);
+ await page.getByLabel('用户名',{exact:true}).fill(username);
  await page.getByLabel('密码',{exact:true}).fill(password);
- const signup=page.waitForResponse(r=>new URL(r.url()).pathname.endsWith('/sign-up/email')&&r.request().method()==='POST');
- await page.getByRole('button',{name:'创建账户',exact:true}).click();
- expect((await signup).status()).toBe(200);
- await expect(page.getByRole('button',{name:'登录',exact:true})).toBeVisible();
- await page.getByLabel('邮箱',{exact:true}).fill(email);
- await page.getByLabel('密码',{exact:true}).fill(password);
- const login=page.waitForResponse(r=>new URL(r.url()).pathname.endsWith('/sign-in/email')&&r.request().method()==='POST');
+ const login=page.waitForResponse(r=>new URL(r.url()).pathname.endsWith('/sign-in/username')&&r.request().method()==='POST');
  await page.getByRole('button',{name:'登录',exact:true}).click();
  expect((await login).status()).toBe(200);
  await expect(page.locator('.daily-letter')).toBeVisible();
@@ -117,7 +111,9 @@ test('saved explorations, private calendar, actions, reviews and export survive 
    console.log('PERSONAL_STAGE '+info.project.name+' session-request-held');
    await sessionBarrier;
    await route.continue();
-  },{times:1});
+  });
+  // StrictMode cancels the initial signal-aware query and may issue a replacement.
+  // Hold every /me response until release, rather than only the cancelled request.
   try{
    await test.step('页面可交互时观察未完成的真实会话请求',async()=>{
     console.log('PERSONAL_STAGE '+info.project.name+' tarot-navigation-start');
@@ -282,12 +278,12 @@ test('saved explorations, private calendar, actions, reviews and export survive 
  // Only this disposable test user's row is seeded; the deletion itself uses the real UI and API.
  const failedReportId=randomUUID(),fixtureDb=new PrismaClient();
  try{
-  const owner=await fixtureDb.user.findUniqueOrThrow({where:{email},select:{id:true}});
+  const owner=await fixtureDb.user.findUniqueOrThrow({where:{username},select:{id:true}});
   await fixtureDb.reviewReport.create({data:{id:failedReportId,userId:owner.id,period:'month',startDate:daily.date,endDate:daily.date,includeJournal:false,requestId:randomUUID(),status:'failed',inputCipher:null,resultCipher:null}});
   const loadedReports=page.waitForResponse(response=>new URL(response.url()).pathname==='/api/v1/insights/reports'&&response.request().method()==='GET');
   await page.getByRole('button',{name:'刷新',exact:true}).click();
   expect((await loadedReports).status()).toBe(200);
-  const failedReport=page.locator('.insight-report').filter({has:page.getByText('这次生成未完成。报告没有可用的 AI 内容，请稍后重新发起。',{exact:true})});
+  const failedReport=page.locator('.insight-report').filter({has:page.getByText('这份回顾暂时没有可显示的内容。可以刷新列表查看最新状态。',{exact:true})});
   await expect(failedReport).toHaveCount(1);
   await expect(failedReport.getByRole('button',{name:'删除这份回顾',exact:true})).toBeVisible();
   const deletingReport=write(page,'/api/v1/insights/reports/'+failedReportId,'DELETE');

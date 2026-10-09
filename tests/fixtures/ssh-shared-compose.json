@@ -1,0 +1,289 @@
+{
+  "name": "star-oracle-shared",
+  "services": {
+    "redis": {
+      "restart": "no",
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "labels": {
+        "io.star-oracle.deployment": "ssh-shared"
+      },
+      "cpus": 1,
+      "pids_limit": 256,
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-size": "10m",
+          "max-file": "3"
+        }
+      },
+      "image": "redis:7.4",
+      "mem_limit": 201326592,
+      "environment": {
+        "REDIS_PASSWORD": "5555555555555555555555555555555555555555555555555555555555555555"
+      },
+      "command": [
+        "sh",
+        "-c",
+        "exec redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy noeviction --requirepass \"$REDIS_PASSWORD\""
+      ],
+      "volumes": [
+        {
+          "type": "volume",
+          "source": "redis-data",
+          "target": "/data"
+        }
+      ],
+      "networks": {
+        "backend": {
+          "ipv4_address": "172.30.78.5"
+        }
+      },
+      "healthcheck": {
+        "test": [
+          "CMD-SHELL",
+          "REDISCLI_AUTH=$REDIS_PASSWORD redis-cli ping"
+        ],
+        "interval": "5s",
+        "timeout": "5s",
+        "retries": 20
+      },
+      "read_only": true,
+      "cap_drop": [
+        "ALL"
+      ],
+      "tmpfs": [
+        "/tmp"
+      ],
+      "user": "999:999",
+      "memswap_limit": 201326592
+    },
+    "migrate": {
+      "restart": "no",
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "labels": {
+        "io.star-oracle.deployment": "ssh-shared"
+      },
+      "cpus": 1,
+      "pids_limit": 256,
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-size": "10m",
+          "max-file": "3"
+        }
+      },
+      "image": "star-oracle-api:local",
+      "read_only": true,
+      "tmpfs": [
+        "/tmp"
+      ],
+      "cap_drop": [
+        "ALL"
+      ],
+      "mem_limit": 536870912,
+      "environment": {
+        "DATABASE_URL": "mysql://staroracle_migrator:2222222222222222222222222222222222222222222222222222222222222222@oracle-mysql:3306/staroracle?connection_limit=5",
+        "SHARED_MYSQL_UUID": "11223344-1122-3344-5566-112233445566",
+        "SHARED_MYSQL_VERSION": "8.4.11"
+      },
+      "command": [
+        "node",
+        "apps/api/dist/maintenance/shared-entrypoint.js",
+        "migrator",
+        "migrate"
+      ],
+      "networks": {
+        "backend": {
+          "ipv4_address": "172.30.78.6"
+        }
+      },
+      "user": "1000:1000",
+      "memswap_limit": 536870912
+    },
+    "api": {
+      "restart": "no",
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "labels": {
+        "io.star-oracle.deployment": "ssh-shared"
+      },
+      "cpus": 1,
+      "pids_limit": 256,
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-size": "10m",
+          "max-file": "3"
+        }
+      },
+      "image": "star-oracle-api:local",
+      "read_only": true,
+      "tmpfs": [
+        "/tmp"
+      ],
+      "cap_drop": [
+        "ALL"
+      ],
+      "mem_limit": 536870912,
+      "environment": {
+        "NODE_ENV": "production",
+        "DEPLOYMENT_MODE": "ssh-only",
+        "SSH_ONLY_CONTAINER": "true",
+        "PORT": "3001",
+        "WEB_ORIGIN": "http://localhost:17777",
+        "API_PUBLIC_URL": "http://localhost:17777",
+        "TRUST_PROXY": "false",
+        "ADMIN_REQUIRE_2FA": "true",
+        "DATABASE_URL": "mysql://staroracle_app:1111111111111111111111111111111111111111111111111111111111111111@oracle-mysql:3306/staroracle?connection_limit=5",
+        "REDIS_URL": "redis://:5555555555555555555555555555555555555555555555555555555555555555@redis:6379",
+        "AUTH_SECRET": "6666666666666666666666666666666666666666666666666666666666666666",
+        "DATA_ENCRYPTION_KEY": "7777777777777777777777777777777777777777777777777777777777777777",
+        "AI_API_KEY": "None",
+        "AI_BASE_URL": "https://api.deepseek.com/v1",
+        "AI_PROVIDER_NAME": "DeepSeek",
+        "AI_MODEL": "deepseek-chat",
+        "AI_DAILY_LIMIT": "200",
+        "SHARED_MYSQL_UUID": "11223344-1122-3344-5566-112233445566",
+        "SHARED_MYSQL_VERSION": "8.4.11"
+      },
+      "networks": {
+        "ssh": {
+          "ipv4_address": "172.30.77.2"
+        },
+        "backend": {
+          "ipv4_address": "172.30.78.2"
+        }
+      },
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "node",
+          "-e",
+          "const r=require('node:http').get('http://127.0.0.1:3001/api/v1/health',{headers:{Host:'localhost:17777'},agent:false,timeout:4000},s=>{s.on('error',()=>{process.exitCode=1});s.resume();if(s.statusCode!==200)process.exitCode=1});r.on('timeout',()=>{process.exitCode=1;r.destroy()});r.on('error',()=>{process.exitCode=1})"
+        ],
+        "interval": "5s",
+        "timeout": "5s",
+        "retries": 30
+      },
+      "user": "1000:1000",
+      "command": [
+        "node",
+        "apps/api/dist/maintenance/shared-entrypoint.js",
+        "app",
+        "serve"
+      ],
+      "memswap_limit": 536870912
+    },
+    "web": {
+      "restart": "no",
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "labels": {
+        "io.star-oracle.deployment": "ssh-shared"
+      },
+      "cpus": 1,
+      "pids_limit": 256,
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-size": "10m",
+          "max-file": "3"
+        }
+      },
+      "image": "star-oracle-web:local",
+      "command": [
+        "nginx",
+        "-c",
+        "/etc/nginx/ssh.conf",
+        "-g",
+        "daemon off;"
+      ],
+      "mem_limit": 134217728,
+      "read_only": true,
+      "tmpfs": [
+        "/tmp"
+      ],
+      "cap_drop": [
+        "ALL"
+      ],
+      "ports": [
+        {
+          "host_ip": "127.0.0.1",
+          "published": "17777",
+          "target": 8080,
+          "protocol": "tcp",
+          "mode": "ingress"
+        }
+      ],
+      "networks": {
+        "ssh": {
+          "ipv4_address": "172.30.77.3"
+        }
+      },
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "wget",
+          "-q",
+          "-O",
+          "/dev/null",
+          "--header=Host: localhost:17777",
+          "http://127.0.0.1:8080/"
+        ],
+        "interval": "5s",
+        "timeout": "5s",
+        "retries": 20
+      },
+      "user": "101:101",
+      "memswap_limit": 134217728
+    }
+  },
+  "networks": {
+    "ssh": {
+      "name": "star-oracle-shared-edge",
+      "driver": "bridge",
+      "enable_ipv6": false,
+      "driver_opts": {
+        "com.docker.network.bridge.host_binding_ipv4": "127.0.0.1",
+        "com.docker.network.bridge.gateway_mode_ipv4": "nat"
+      },
+      "ipam": {
+        "config": [
+          {
+            "subnet": "172.30.77.0/24",
+            "gateway": "172.30.77.1"
+          }
+        ]
+      }
+    },
+    "backend": {
+      "name": "star-oracle-shared-backend",
+      "driver": "bridge",
+      "internal": true,
+      "enable_ipv6": false,
+      "driver_opts": {
+        "com.docker.network.bridge.host_binding_ipv4": "127.0.0.1",
+        "com.docker.network.bridge.gateway_mode_ipv4": "nat"
+      },
+      "ipam": {
+        "config": [
+          {
+            "subnet": "172.30.78.0/24",
+            "gateway": "172.30.78.1"
+          }
+        ]
+      }
+    }
+  },
+  "volumes": {
+    "redis-data": {
+      "name": "star-oracle-shared-redis-data"
+    }
+  }
+}

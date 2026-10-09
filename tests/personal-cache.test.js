@@ -45,3 +45,10 @@ test('cancelled older GET cannot overwrite confirmed private edits',async()=>{
   assert.equal(client.getQueryData(key).pages[0].items[0].note,'confirmed');
  }finally{client.clear();}
 });
+test('same account with a replaced session cannot accept a pre-login owner token',async()=>{
+ const client=new QueryClient();try{
+  client.setQueryData(['me'],{id:'owner',sessionBinding:'old-session'});const owner=captureOwner(client,'owner');
+  client.setQueryData(['me'],{id:'owner',sessionBinding:'new-session'});
+  assert.equal(await patchPrivatePages(client,owner,'history','one',row=>({...row,note:'old-session-private-note'})),false);
+ }finally{client.clear();}
+});

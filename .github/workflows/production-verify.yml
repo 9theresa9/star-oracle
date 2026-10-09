@@ -3,7 +3,7 @@ on:
   push:
     branches: [main, feat/comprehensive-oracle]
   pull_request:
-    paths: ['apps/**', 'packages/**', 'compose*.yml', 'infra/**', 'tests/e2e/**', 'package*.json', 'scripts/**', '.github/workflows/production-verify.yml']
+    paths: ['apps/**', 'packages/**', 'compose*.yml', 'infra/**', 'tests/**', 'package*.json', 'scripts/**', 'docs/**', '.env.ssh.example', '.github/workflows/production-verify.yml']
 permissions:
   contents: read
 concurrency:
@@ -12,7 +12,7 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 45
     services:
       mysql:
         image: mysql:8.4
@@ -25,9 +25,6 @@ jobs:
         options: >-
           --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pintegration-root-password"
           --health-interval=10s --health-timeout=5s --health-retries=15
-      mailpit:
-        image: axllent/mailpit:v1.31.3
-        ports: ['1025:1025', '8025:8025']
       redis:
         image: redis:7.4
         ports: ['6379:6379']
@@ -41,12 +38,11 @@ jobs:
       REDIS_URL: redis://127.0.0.1:6379
       AUTH_SECRET: integration-test-secret-12345678901234567890
       DATA_ENCRYPTION_KEY: 1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef
-      REQUIRE_EMAIL_VERIFICATION: 'false'
       ADMIN_REQUIRE_2FA: 'false'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
@@ -73,7 +69,6 @@ jobs:
           NODE_EXTRA_CA_CERTS: /tmp/star-oracle-tls/cert.pem
           MOCK_TLS_CERT: /tmp/star-oracle-tls/cert.pem
           MOCK_TLS_KEY: /tmp/star-oracle-tls/key.pem
-          MAILPIT_URL: http://127.0.0.1:8025
       - name: Checkout fixed performance baseline
         if: github.event_name == 'push'
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -124,11 +119,37 @@ jobs:
           CI_VISUAL_REVIEW: 'true'
           CI_REVIEW_DETAIL: 'true'
           CI_VISUAL_REVIEW_DETAIL: 'true'
+      - name: Verify formal SSH HTTP sessions in real browsers
+        run: |
+          ssh_redis_password="$(openssl rand -hex 32)"
+          echo "::add-mask::$ssh_redis_password"
+          docker run -d --name star-oracle-ssh-browser-redis --publish 127.0.0.1:6380:6379 redis:7.4 redis-server --requirepass "$ssh_redis_password"
+          trap 'docker rm -f star-oracle-ssh-browser-redis >/dev/null' EXIT
+          for attempt in $(seq 1 30); do
+            if docker exec -e REDISCLI_AUTH="$ssh_redis_password" star-oracle-ssh-browser-redis redis-cli ping | grep -q PONG; then break; fi
+            sleep 1
+          done
+          NODE_ENV=test REDIS_URL="redis://:$ssh_redis_password@127.0.0.1:6380" npx playwright test -c tests/e2e/playwright.ssh.config.ts
       - name: Validate production Docker builds and isolated stack
+        if: ${{ !cancelled() }}
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y age
           bash scripts/container-smoke.sh
+      - name: Verify actual SSH Docker routing and cookie boundaries
+        run: node scripts/ssh-container-smoke.mjs --proof "$RUNNER_TEMP/ssh-verified-images.json"
+      - name: Export exact verified images and offline SSH deployment bundle
+        if: success()
+        run: node scripts/ssh-release.mjs pack "$RUNNER_TEMP/star-oracle-ssh" --proof "$RUNNER_TEMP/ssh-verified-images.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: success()
+        with:
+          name: star-oracle-ssh-linux-amd64-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/star-oracle-ssh/
+          include-hidden-files: true
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
       - name: Record verified revision
         if: always()
         run: git rev-parse HEAD > verified-revision.txt

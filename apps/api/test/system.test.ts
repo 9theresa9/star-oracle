@@ -5,25 +5,30 @@ import { createServer as httpsServer,type Server as HTTPSServer } from 'node:htt
 import { readFileSync } from 'node:fs';
 import { createHmac } from 'node:crypto';
 import { Redis } from 'ioredis';
+import { createEmailVerificationToken } from 'better-auth/api';
 import { db,redis,seal,open,chinaDate,consumeLimit,connectRedis } from '../src/infrastructure.js';
-let child:ChildProcess,mailChild:ChildProcess,model:HTTPSServer;
+import { provisionAccount } from '../src/maintenance/account-service.js';
+let child:ChildProcess,model:HTTPSServer;
 let providerCalls=0,startupEvent='none',healthStatus=0;
 const base='http://127.0.0.1:3111',origin='http://localhost:5173';
+const createdUsers:string[]=[];
 async function request(path:string,{cookie='',method='GET',body,originOverride=origin}:{cookie?:string;method?:string;body?:unknown;originOverride?:string}={}) {
  return fetch(base+path,{method,headers:{'Content-Type':'application/json',Origin:originOverride,...(cookie?{Cookie:cookie}:{})},...(body!==undefined?{body:JSON.stringify(body)}:{})});
 }
-async function register(label:string) {
- const email=label+'-'+crypto.randomUUID()+'@example.com';
- const r=await request('/api/auth/sign-up/email',{method:'POST',body:{name:label,email,password:'a-strong-test-password-123',role:'admin',disabled:false}});
- assert.equal(r.status,200);const data=await r.json();
+async function precreatedAccount(label:string) {
+ const username=label.toLowerCase().replace(/[^a-z0-9]/g,'_').slice(0,15)+'_'+crypto.randomUUID().replaceAll('-','').slice(0,16);
+ const user=await provisionAccount(db,{name:label,username,password:'a-strong-test-password-123'});
+ createdUsers.push(user.id);
+ const r=await request('/api/auth/sign-in/username',{method:'POST',body:{username,password:'a-strong-test-password-123',role:'admin',disabled:false,emailVerified:true,twoFactorEnabled:true}});
+ assert.equal(r.status,200);const data=await r.json();assert.equal(data.user.id,user.id);
  const cookie=r.headers.getSetCookie().map(value=>value.split(';')[0]).join('; ');
- assert.ok(cookie);return {id:data.user.id as string,cookie,email};
+ assert.ok(cookie);return {id:user.id,cookie,username,email:user.email};
 }
 before(async()=>{
- await connectRedis();
  const testDatabase=new URL(process.env.DATABASE_URL??''),testRedis=new URL(process.env.REDIS_URL??'');
  const isLocal=(host:string)=>['127.0.0.1','localhost','[::1]'].includes(host);
  if(process.env.NODE_ENV!=='test'||!isLocal(testDatabase.hostname)||!isLocal(testRedis.hostname)||testDatabase.pathname!=='/star_oracle')throw new Error('System fixtures require isolated loopback test services');
+ await connectRedis();
  await redis.flushdb();
  if(process.env.MOCK_TLS_CERT&&process.env.MOCK_TLS_KEY){
  model=httpsServer({cert:readFileSync(process.env.MOCK_TLS_CERT),key:readFileSync(process.env.MOCK_TLS_KEY)},async(req,res)=>{
@@ -40,10 +45,10 @@ before(async()=>{
  for(let i=0;i<100;i++){try{const r=await request('/api/v1/health');healthStatus=r.status;if(r.ok)return;}catch{}await new Promise(r=>setTimeout(r,100));}
  throw new Error('Integration API failed to start: '+startupEvent+', health='+healthStatus);
 });
-after(async()=>{child?.kill('SIGTERM');mailChild?.kill('SIGTERM');if(model)await new Promise<void>(resolve=>model.close(()=>resolve()));await db.$disconnect();redis.disconnect();});
+after(async()=>{child?.kill('SIGTERM');if(model)await new Promise<void>(resolve=>model.close(()=>resolve()));if(createdUsers.length)await db.user.deleteMany({where:{id:{in:createdUsers}}});await db.$disconnect();redis.disconnect();});
 test('authenticated records, ownership, sharing and diary isolation',async()=>{
  await redis.flushdb();
- const a=await register('owner'),b=await register('other');
+ const a=await precreatedAccount('owner'),b=await precreatedAccount('other');
  const me=await request('/api/v1/me',{cookie:a.cookie});assert.equal((await me.json()).role,'user','client role injection must fail');
  const input={kind:'tarot',question:'我可以怎样整理今天的安排？',spread:'three',allowReversed:true,requestId:crypto.randomUUID()};
  const first=await request('/api/v1/readings',{cookie:a.cookie,method:'POST',body:input});assert.equal(first.status,201);const record=await first.json();
@@ -88,7 +93,7 @@ test('encryption authenticates ciphertext and Shanghai calendar boundary',()=>{
 
 test('AI uses owned evidence, validates references and persists a global daily request budget',{skip:!process.env.MOCK_TLS_CERT},async()=>{
  await redis.flushdb();
- const owner=await register('ai-owner');
+ const owner=await precreatedAccount('ai-owner');
  async function draw(question:string){
   const r=await request('/api/v1/readings',{cookie:owner.cookie,method:'POST',body:{kind:'tarot',question,spread:'single',allowReversed:false,requestId:crypto.randomUUID()}});
   assert.equal(r.status,201);return r.json();
@@ -122,7 +127,7 @@ function totpCode(secret:string):string {
 }
 test('TOTP enrollment, pending login and one-time recovery codes',async()=>{
  await redis.flushdb();
- const owner=await register('totp-owner');
+ const owner=await precreatedAccount('totp-owner');
  const enable=await request('/api/auth/two-factor/enable',{cookie:owner.cookie,method:'POST',body:{password:'a-strong-test-password-123',method:'totp'}});
  assert.equal(enable.status,200);const setup=await enable.json();assert.equal(setup.method,'totp');
  const secret=new URL(setup.totpURI).searchParams.get('secret')!;
@@ -130,7 +135,7 @@ test('TOTP enrollment, pending login and one-time recovery codes',async()=>{
  assert.equal(verified.status,200);
  const updated=verified.headers.getSetCookie().map(x=>x.split(';')[0]).join('; ')||owner.cookie;
  await request('/api/auth/sign-out',{cookie:updated,method:'POST',body:{}});
- const login=await request('/api/auth/sign-in/email',{method:'POST',body:{email:owner.email,password:'a-strong-test-password-123'}});
+ const login=await request('/api/auth/sign-in/username',{method:'POST',body:{username:owner.username,password:'a-strong-test-password-123'}});
  assert.equal(login.status,200);assert.equal((await login.json()).twoFactorRedirect,true);
  const pending=login.headers.getSetCookie().map(x=>x.split(';')[0]).join('; ');
  assert.equal((await request('/api/v1/me',{cookie:pending})).status,401,'password alone must not create an authenticated 2FA session');
@@ -150,48 +155,71 @@ test('rate limit counter is shared across independent Redis connections',async()
  }finally{second.disconnect();}
 });
 
-test('verified email registration and password reset revoke prior sessions',{skip:!process.env.MAILPIT_URL},async()=>{
+test('precreated username login ignores client privileges and never creates unknown accounts',async()=>{
  await redis.flushdb();
- const mailBase='http://127.0.0.1:3112',mailpit=process.env.MAILPIT_URL!;
- mailChild=spawn(process.execPath,['dist/main.js'],{cwd:process.cwd(),env:{...process.env,PORT:'3112',API_PUBLIC_URL:mailBase,REQUIRE_EMAIL_VERIFICATION:'true',SMTP_HOST:'127.0.0.1',SMTP_PORT:'1025',SMTP_SECURE:'false',SMTP_FROM:'Oracle <oracle@example.com>'},stdio:['ignore','pipe','pipe']});
- for(let i=0;i<100;i++){try{if((await fetch(mailBase+'/api/v1/health')).ok)break;}catch{}await new Promise(r=>setTimeout(r,100));}
- const send=(path:string,body:unknown,cookie='')=>fetch(mailBase+path,{method:'POST',headers:{Origin:origin,'Content-Type':'application/json',...(cookie?{Cookie:cookie}:{})},body:JSON.stringify(body)});
- const email='verified-'+crypto.randomUUID()+'@example.com',password='verified-test-password-123';
- const signup=await send('/api/auth/sign-up/email',{name:'Email fixture',email,password,callbackURL:origin+'/account'});
- assert.equal(signup.status,200);
- const unverified=await send('/api/auth/sign-in/email',{email,password});assert.equal(unverified.status,403);
- async function messageLink(fragment:string){
-  for(let i=0;i<100;i++){
-   const list=await fetch(mailpit+'/api/v1/messages').then(r=>r.json());
-   for(const m of list.messages??[]){
-    if(!m.To?.some((to:{Address:string})=>to.Address===email))continue;
-    const message=await fetch(mailpit+'/api/v1/message/'+m.ID).then(r=>r.json());
-    const link=(message.Text as string).match(/https?:\/\/[^\s]+/g)?.find(url=>url.includes(fragment));
-    if(link)return link;
-   }
-   await new Promise(r=>setTimeout(r,100));
-  }
-  throw new Error('Expected verification/reset email was not delivered');
+ const owner=await precreatedAccount('credential-owner');
+ const stored=await db.user.findUniqueOrThrow({where:{id:owner.id}});
+ assert.equal(stored.role,'user');assert.equal(stored.disabled,false);assert.equal(stored.twoFactorEnabled,false);
+ assert.equal((await request('/api/v1/me',{cookie:owner.cookie}).then(r=>r.json())).role,'user');
+ assert.equal((await request('/api/v1/admin/overview',{cookie:owner.cookie})).status,403);
+ const usersBefore=await db.user.count(),sessionsBefore=await db.session.count({where:{userId:owner.id}});
+ for(const body of [
+  {username:owner.username,password:'incorrect-test-password-123'},
+  {username:'missing_'+crypto.randomUUID().replaceAll('-','').slice(0,16),password:'a-strong-test-password-123',name:'Injected account',role:'admin'},
+ ]){
+  const denied=await request('/api/auth/sign-in/username',{method:'POST',body});
+  assert.equal(denied.status,401);assert.equal(denied.headers.getSetCookie().length,0);
  }
- const verified=await fetch(await messageLink('verify-email'),{redirect:'manual'});
- assert.equal(verified.status,302);
- const login=await send('/api/auth/sign-in/email',{email,password});assert.equal(login.status,200);
- const cookie=login.headers.getSetCookie().map(v=>v.split(';')[0]).join('; ');
- assert.equal((await fetch(mailBase+'/api/v1/me',{headers:{Cookie:cookie}})).status,200);
- const reset=await send('/api/auth/request-password-reset',{email,redirectTo:origin+'/account'});assert.equal(reset.status,200);
- const resetLink=await messageLink('reset-password');
- const redirected=await fetch(resetLink,{redirect:'manual'});
- const token=new URL(redirected.headers.get('location')??resetLink).searchParams.get('token');
- assert.ok(token);
- const changed=await send('/api/auth/reset-password',{token,newPassword:'a-new-verified-password-456'});assert.equal(changed.status,200);
- assert.equal((await fetch(mailBase+'/api/v1/me',{headers:{Cookie:cookie}})).status,401);
- assert.equal((await send('/api/auth/sign-in/email',{email,password})).status,401);
- assert.equal((await send('/api/auth/sign-in/email',{email,password:'a-new-verified-password-456'})).status,200);
- const user=await db.user.findUniqueOrThrow({where:{email}});
+ assert.equal(await db.user.count(),usersBefore);assert.equal(await db.session.count({where:{userId:owner.id}}),sessionsBefore);
+});
+test('public signup and email authentication routes stay disabled even for a valid legacy verification token',async()=>{
+ await redis.flushdb();
+ const owner=await precreatedAccount('legacy-email');
+ await db.user.update({where:{id:owner.id},data:{emailVerified:false}});
+ const token=await createEmailVerificationToken(process.env.AUTH_SECRET!,owner.email);
+ const credential=await db.account.findFirstOrThrow({where:{userId:owner.id,providerId:'credential'}});
+ const usersBefore=await db.user.count(),sessionsBefore=await db.session.count({where:{userId:owner.id}});
+ const newEmail='blocked-'+crypto.randomUUID()+'@example.com';
+ for(const [path,body] of [
+  ['/sign-up/email',{name:'Public registration is disabled',username:'blocked_'+crypto.randomUUID().replaceAll('-','').slice(0,16),email:newEmail,password:'a-strong-test-password-123',role:'admin'}],
+  ['/sign-in/email',{email:owner.email,password:'a-strong-test-password-123'}],
+  ['/send-verification-email',{email:owner.email,callbackURL:origin+'/account'}],
+  ['/request-password-reset',{email:owner.email,redirectTo:origin+'/account'}],
+  ['/reset-password',{token,newPassword:'an-unapproved-new-password-456'}],
+  ['/change-email',{newEmail}],
+ ] as const){
+  for(const cookie of ['',owner.cookie]){
+   const blocked=await request('/api/auth'+path,{cookie,method:'POST',body});
+   assert.equal(blocked.status,404,path+' must stay disabled with or without a session');assert.equal(blocked.headers.getSetCookie().length,0);
+  }
+ }
+ for(const path of ['/verify-email?token='+encodeURIComponent(token)+'&callbackURL='+encodeURIComponent(origin+'/account'),'/reset-password/'+encodeURIComponent(token)+'?callbackURL='+encodeURIComponent(origin+'/account')]){
+  const blocked=await fetch(base+'/api/auth'+path,{redirect:'manual',headers:{Origin:origin}});
+  assert.equal(blocked.status,404,'an old link must not revive an email workflow');assert.equal(blocked.headers.get('location'),null);assert.equal(blocked.headers.getSetCookie().length,0);
+ }
+ const unchanged=await db.user.findUniqueOrThrow({where:{id:owner.id}});
+ assert.equal(unchanged.email,owner.email);assert.equal(unchanged.emailVerified,false);
+ assert.equal((await db.account.findUniqueOrThrow({where:{id:credential.id}})).password,credential.password);
+ assert.equal(await db.user.count(),usersBefore);assert.equal(await db.user.count({where:{email:newEmail}}),0);
+ assert.equal(await db.session.count({where:{userId:owner.id}}),sessionsBefore);
+ assert.equal((await request('/api/v1/me',{cookie:owner.cookie})).status,200,'blocked legacy routes cannot revoke the current account session');
+});
+test('precreated ordinary users can delete their account and cascade owned records',async()=>{
+ await redis.flushdb();const user=await precreatedAccount('delete-owner');
  // Ordinary users can delete their account; the server cascades all owned records.
  await db.dailyEntry.create({data:{id:crypto.randomUUID(),userId:user.id,date:'2026-01-01',payload:{},note:seal('fixture')}});
- const signed=await send('/api/auth/sign-in/email',{email,password:'a-new-verified-password-456'});
- const finalCookie=signed.headers.getSetCookie().map(v=>v.split(';')[0]).join('; ');
- const deleted=await send('/api/auth/delete-user',{password:'a-new-verified-password-456'},finalCookie);assert.equal(deleted.status,200);
+ const deleted=await request('/api/auth/delete-user',{cookie:user.cookie,method:'POST',body:{password:'a-strong-test-password-123'}});assert.equal(deleted.status,200);
  assert.equal(await db.user.count({where:{id:user.id}}),0);assert.equal(await db.dailyEntry.count({where:{userId:user.id}}),0);
+ assert.equal(await db.account.count({where:{userId:user.id}}),0);assert.equal(await db.session.count({where:{userId:user.id}}),0);
+ assert.equal((await request('/api/v1/me',{cookie:user.cookie})).status,401);
+});
+
+test('account security mutations reject an old page actor before Better Auth handles them',async()=>{
+ await redis.flushdb();const owner=await precreatedAccount('bound-owner'),other=await precreatedAccount('bound-other');
+ const me=await request('/api/v1/me',{cookie:owner.cookie});const expected=await me.json();
+ for(const path of ['/api/auth/two-factor/enable','/api/auth/two-factor/disable','/api/auth/delete-user']){
+  const response=await fetch(base+path,{method:'POST',headers:{'Content-Type':'application/json',Origin:origin,Cookie:other.cookie,'X-Expected-Actor':owner.id,'X-Expected-Session':expected.sessionBinding},body:JSON.stringify({password:'a-strong-test-password-123',method:'totp'})});
+  assert.equal(response.status,409);assert.equal((await response.json()).code,'SESSION_CHANGED');
+ }
+ const remaining=await db.user.findUniqueOrThrow({where:{id:other.id}});assert.equal(remaining.twoFactorEnabled,false);
 });

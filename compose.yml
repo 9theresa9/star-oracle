@@ -14,14 +14,7 @@ x-api: &api
     TRUST_PROXY: linklocal,uniquelocal
     AUTH_SECRET: ${AUTH_SECRET:?Set AUTH_SECRET}
     DATA_ENCRYPTION_KEY: ${DATA_ENCRYPTION_KEY:?Set DATA_ENCRYPTION_KEY}
-    REQUIRE_EMAIL_VERIFICATION: 'true'
     ADMIN_REQUIRE_2FA: 'true'
-    SMTP_HOST: ${SMTP_HOST:?Set SMTP_HOST}
-    SMTP_PORT: ${SMTP_PORT:-587}
-    SMTP_SECURE: ${SMTP_SECURE:-false}
-    SMTP_USER: ${SMTP_USER:-}
-    SMTP_PASSWORD: ${SMTP_PASSWORD:-}
-    SMTP_FROM: ${SMTP_FROM:?Set SMTP_FROM}
     AI_API_KEY: ${AI_API_KEY:-}
     AI_BASE_URL: ${AI_BASE_URL:-https://api.deepseek.com/v1}
     AI_PROVIDER_NAME: ${AI_PROVIDER_NAME:-DeepSeek}
@@ -32,6 +25,7 @@ x-api: &api
   tmpfs: [/tmp]
   cap_drop: [ALL]
   security_opt: [no-new-privileges:true]
+  logging: {driver: json-file, options: {max-size: "10m", max-file: "3"}}
   depends_on:
     mysql: {condition: service_healthy}
     redis: {condition: service_healthy}
@@ -91,6 +85,7 @@ services:
       retries: 5
     logging: {driver: json-file, options: {max-size: "10m", max-file: "3"}}
   web:
+    logging: {driver: json-file, options: {max-size: "10m", max-file: "3"}}
     build:
       context: .
       dockerfile: apps/web/Dockerfile

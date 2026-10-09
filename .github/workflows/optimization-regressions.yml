@@ -1,0 +1,103 @@
+name: Bounded optimization regressions
+on:
+  pull_request:
+    paths: ['apps/web/**', 'tests/e2e/**', '.github/workflows/optimization-regressions.yml']
+permissions:
+  contents: read
+concurrency:
+  group: optimization-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  form-and-review-boundaries:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium webkit
+      - run: npx playwright test -c tests/e2e/playwright.optimization.config.ts
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: optimization-ui-review
+          path: |
+            test-results/optimization/
+            playwright-report/optimization/
+          retention-days: 7
+          if-no-files-found: error
+  webkit-refresh-evidence:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        sequence: [isolated, full-suite]
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: integration-root-password
+          MYSQL_DATABASE: star_oracle
+          MYSQL_USER: oracle
+          MYSQL_PASSWORD: integration-db-password
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pintegration-root-password"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    env:
+      CI: 'true'
+      NODE_ENV: test
+      DATABASE_URL: mysql://oracle:integration-db-password@127.0.0.1:3306/star_oracle
+      REDIS_URL: redis://:synthetic-ssh-refresh-redis-password@127.0.0.1:6380
+      AUTH_SECRET: synthetic-ssh-refresh-auth-secret-12345678901234567890
+      DATA_ENCRYPTION_KEY: 1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef
+      ORACLE_SSH_REFRESH_DIAGNOSTICS: '1'
+      ORACLE_SSH_REFRESH_MODE: fast
+      DEBUG: pw:browser
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run db:generate
+      - run: npm run db:migrate -w @star-oracle/api
+      - run: npm run build
+      - run: npx playwright install --with-deps webkit
+      - name: Start isolated authenticated Redis
+        run: |
+          docker run -d --name synthetic-ssh-refresh-redis --publish 127.0.0.1:6380:6379 redis:7.4 redis-server --requirepass synthetic-ssh-refresh-redis-password
+          for attempt in $(seq 1 30); do
+            if docker exec synthetic-ssh-refresh-redis redis-cli -a synthetic-ssh-refresh-redis-password ping 2>/dev/null | grep -q PONG; then exit 0; fi
+            sleep 1
+          done
+          exit 1
+      - name: Observe a fresh WebKit browser without retries
+        if: matrix.sequence == 'isolated'
+        run: npx playwright test -c tests/e2e/playwright.ssh.config.ts --project=ssh-iphone-webkit --grep 'TOTP and single-use recovery codes' --retries=0
+      - name: Observe the original context sequence in one WebKit browser
+        if: matrix.sequence == 'full-suite'
+        run: npx playwright test -c tests/e2e/playwright.ssh.config.ts --project=ssh-iphone-webkit --retries=0
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: ssh-refresh-${{ matrix.sequence }}-evidence
+          path: |
+            test-results/ssh-only/
+            playwright-report/ssh-only/
+          retention-days: 7
+          if-no-files-found: error
+      - name: Stop the isolated Redis fixture
+        if: always()
+        run: docker rm -f synthetic-ssh-refresh-redis >/dev/null 2>&1 || true

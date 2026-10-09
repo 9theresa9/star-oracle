@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { db,redis,seal,open,chinaDate,connectRedis } from '../src/infrastructure.js';
 import { SPREADS,SCENARIOS,castNumberLines,castTimeLines,drawTarot,evidenceFor,type Reading } from '@star-oracle/domain';
 import { requestModel } from '../src/model.service.js';
+import { provisionAccount } from '../src/maintenance/account-service.js';
 let child:ChildProcess,model:HTTPSServer,providerCalls=0;
 const base='http://127.0.0.1:3113',origin='http://localhost:5173';
 const createdUsers:string[]=[];
@@ -22,12 +23,14 @@ const providerInputs:{question:string;evidence:{reference:string}[];context?:str
 async function request(path:string,{cookie='',method='GET',body}:{cookie?:string;method?:string;body?:unknown}={}){
  return fetch(base+path,{method,headers:{'Content-Type':'application/json',Origin:origin,...(cookie?{Cookie:cookie}:{})},...(body!==undefined?{body:JSON.stringify(body)}:{})});
 }
-async function register(label:string){
- const email=label+'-'+randomUUID()+'@example.com';
- const response=await request('/api/auth/sign-up/email',{method:'POST',body:{name:label,email,password:'oracle-expansion-strong-password-123'}});
+async function precreatedAccount(label:string){
+ const username=label.toLowerCase().replace(/[^a-z0-9]/g,'_').slice(0,15)+'_'+randomUUID().replaceAll('-','').slice(0,16);
+ const user=await provisionAccount(db,{name:label,username,password:'oracle-expansion-strong-password-123'});
+ createdUsers.push(user.id);
+ const response=await request('/api/auth/sign-in/username',{method:'POST',body:{username,password:'oracle-expansion-strong-password-123'}});
  assert.equal(response.status,200);
  const data=await response.json(),cookie=response.headers.getSetCookie().map(value=>value.split(';')[0]).join('; ');
- createdUsers.push(data.user.id);return {id:data.user.id as string,cookie};
+ assert.equal(data.user.id,user.id);assert.ok(cookie);return {id:user.id,cookie};
 }
 async function draw(cookie:string,overrides:Record<string,unknown>={}){
  const response=await request('/api/v1/readings',{cookie,method:'POST',body:{kind:'tarot',question:'我可以怎样整理自己的选择？',spread:'three',allowReversed:true,requestId:randomUUID(),...overrides}});
@@ -64,7 +67,7 @@ after(async()=>{
  await db.$disconnect();redis.disconnect();
 });
 test('expanded casts preserve legacy requests and canonical server results',async()=>{
- const owner=await register('cast-owner');
+ const owner=await precreatedAccount('cast-owner');
  const catalog=await request('/api/v1/oracle/catalog').then(r=>r.json());
  assert.equal(Object.keys(catalog.spreads).length,32);assert.equal(Object.keys(catalog.scenarios).length,15);
  assert.equal(Object.keys(SPREADS).length,32);assert.equal(Object.keys(SCENARIOS).length,15);
@@ -87,7 +90,7 @@ test('expanded casts preserve legacy requests and canonical server results',asyn
  assert.equal((await request('/api/v1/readings',{cookie:owner.cookie,method:'POST',body:{...tarotInput,allowReversed:true}})).status,409);
 });
 test('private metadata, optimistic updates and bounded encrypted search keep every continuation',async()=>{
- const owner=await register('search-owner'),other=await register('search-other');
+ const owner=await precreatedAccount('search-owner'),other=await precreatedAccount('search-other');
  const record=await draw(owner.cookie);
  const input={favorite:true,tags:['工作','PRIVATE-TAG'],note:'PRIVATE-ANNOTATION-SEARCH',version:0};
  assert.equal((await request('/api/v1/readings/'+record.id+'/metadata',{cookie:other.cookie,method:'PATCH',body:input})).status,404);
@@ -106,7 +109,7 @@ test('private metadata, optimistic updates and bounded encrypted search keep eve
  await db.reading.create({data:{id:dateId,userId:owner.id,kind:'tarot',payload:{...dated,question:''},question:seal(dated.question,'question:'+owner.id+':'+dateId),requestId:randomUUID(),createdAt:new Date(timestamp)}});
  const day=await request('/api/v1/readings?dateFrom=2026-03-02&dateTo=2026-03-02',{cookie:owner.cookie}).then(r=>r.json());
  assert.deepEqual(day.items.map((x:{id:string})=>x.id),[dateId]);
- const pageOwner=await register('continuation-owner'),rows=[];
+ const pageOwner=await precreatedAccount('continuation-owner'),rows=[];
  const oldest=Date.now()-1000000;
  for(let i=0;i<606;i++){
   const id=randomUUID(),question=i===0?'UNIQUE-LATE-MATCH':'其他较新的记录';
@@ -123,7 +126,7 @@ test('private metadata, optimistic updates and bounded encrypted search keep eve
  assert.equal((await request('/api/v1/daily/'+daily.id,{cookie:other.cookie})).status,404);
 });
 test('follow-up AI remains on the owned cast, is idempotent, encrypted and budgeted atomically',{skip:!process.env.MOCK_TLS_CERT},async()=>{
- const owner=await register('follow-up-owner'),other=await register('follow-up-other'),record=await draw(owner.cookie);
+ const owner=await precreatedAccount('follow-up-owner'),other=await precreatedAccount('follow-up-other'),record=await draw(owner.cookie);
  const initialRequestId=randomUUID();
  const initial=await request('/api/v1/readings/'+record.id+'/interpret',{cookie:owner.cookie,method:'POST',body:{consent:true,requestId:initialRequestId}});
  assert.equal(initial.status,200);assert.equal((await initial.json()).ai,true);
@@ -205,4 +208,45 @@ test('follow-up AI remains on the owned cast, is idempotent, encrypted and budge
  assert.equal(await db.aIAllowance.count({where:{userId:owner.id}}),allowancesBeforeDelete);
  assert.equal(await db.aIRequest.count({where:{userId:owner.id,readingId:replacement.id}}),0);
  assert.equal(await db.readingConversation.count({where:{readingId:record.id}}),0,'deleting an owned cast cascades its private conversation');
+});
+
+test('completed follow-up cache restores pending/failed projections without another provider call or credit debit',{skip:!process.env.MOCK_TLS_CERT},async()=>{
+ const owner=await precreatedAccount('follow-up-recovery'),record=await draw(owner.cookie);
+ await db.membership.upsert({where:{userId:owner.id},create:{userId:owner.id,credits:3},update:{credits:3}});
+ await db.userAIUsage.upsert({where:{userId_date:{userId:owner.id,date:chinaDate()}},create:{id:randomUUID(),userId:owner.id,date:chinaDate(),requests:5},update:{requests:5}});
+ const input={prompt:'这次结果里最值得先实践的一步是什么？',consent:true,requestId:randomUUID()};
+ const endpoint='/api/v1/readings/'+record.id+'/conversation',callsBefore=providerCalls;
+ const first=await request(endpoint,{cookie:owner.cookie,method:'POST',body:input});
+ assert.equal(first.status,200);const original=await first.json();
+ const persisted=await db.readingConversation.findUniqueOrThrow({where:{id:original.id}});
+ assert.ok(persisted.inputCipher);assert.ok(!persisted.inputCipher.includes(input.prompt));
+ const snapshot=JSON.parse(open(persisted.inputCipher,'conversation-input:'+owner.id+':'+original.id));
+ assert.equal(snapshot.question,input.prompt);
+ assert.throws(()=>open(persisted.inputCipher!,'conversation-input:'+owner.id+':'+randomUUID()));
+ assert.equal((await db.aIRequest.findUniqueOrThrow({where:{userId_requestId:{userId:owner.id,requestId:input.requestId}}})).status,'done');
+ const globalBudget=(await db.aIUsage.findUniqueOrThrow({where:{date:chinaDate()}})).requests;
+ // This later history must not be included in the earlier request's recovery.
+ const newerId=randomUUID(),newerAnswer={...original.answer,summary:'之后的历史不能替换原请求上下文'};
+ await db.readingConversation.create({data:{id:newerId,userId:owner.id,readingId:record.id,requestId:randomUUID(),status:'done',
+  promptCipher:seal('稍后才提出的问题','conversation-prompt:'+owner.id+':'+newerId),answerCipher:seal(JSON.stringify(newerAnswer),'conversation-answer:'+owner.id+':'+newerId)}});
+ await db.reading.update({where:{id:record.id},data:{interpretation:seal(JSON.stringify(newerAnswer),'interpretation:'+owner.id+':'+record.id),ai:true}});
+ for(const state of ['pending','failed'] as const){
+  // Equivalent durable state to a crash or rollback after AIRequest committed.
+  await db.readingConversation.update({where:{id:original.id},data:{status:state,answerCipher:null,pendingSince:state==='pending'?new Date():null}});
+  await db.auditLog.deleteMany({where:{actorId:owner.id,action:'reading.follow-up',targetId:record.id}});
+  const responses=await Promise.all([1,2].map(()=>request(endpoint,{cookie:owner.cookie,method:'POST',body:input})));
+  for(const response of responses){assert.equal(response.status,200);const restored=await response.json();assert.equal(restored.id,original.id);assert.deepEqual(restored.answer,original.answer);assert.equal(restored.status,'done');}
+  assert.equal(await db.auditLog.count({where:{actorId:owner.id,action:'reading.follow-up',targetId:record.id}}),1,'concurrent projection restores record only one audit event');
+  assert.equal(providerCalls,callsBefore+1);
+  assert.equal((await db.aIUsage.findUniqueOrThrow({where:{date:chinaDate()}})).requests,globalBudget);
+  assert.equal((await db.membership.findUniqueOrThrow({where:{userId:owner.id}})).credits,2);
+  assert.equal((await db.userAIUsage.findUniqueOrThrow({where:{userId_date:{userId:owner.id,date:chinaDate()}}})).requests,6);
+  assert.equal(await db.aIAllowance.count({where:{userId:owner.id,requestId:input.requestId}}),1);
+  assert.equal(await db.creditLedger.count({where:{userId:owner.id,requestId:input.requestId,kind:'ai.consume'}}),1);
+ }
+ await db.readingConversation.update({where:{id:original.id},data:{status:'failed',answerCipher:null}});
+ assert.equal((await request(endpoint,{cookie:owner.cookie,method:'POST',body:{...input,prompt:'不能冒用原请求的新问题'}})).status,409);
+ await db.readingConversation.update({where:{id:original.id},data:{inputCipher:null}});
+ assert.equal((await request(endpoint,{cookie:owner.cookie,method:'POST',body:input})).status,503,'legacy rows without an immutable snapshot fail closed');
+ assert.equal(providerCalls,callsBefore+1);
 });

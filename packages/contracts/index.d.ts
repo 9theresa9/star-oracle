@@ -10,7 +10,7 @@ export const UserStatus:ZodType<{disabled:boolean}>;
 export const PageQuery:ZodObject<{cursor:ZodOptional<ZodString>;limit:ZodDefault<ZodNumber>},'strict'>;
 export type ReadingRecord={id:string;reading:Reading;interpretation:Interpretation;ai:boolean;shared:boolean;createdAt:string;favorite?:boolean;tags?:string[];note?:string;metadataVersion?:number};
 export type DailyRecord={id:string;date:string;reading:Reading;journal:JournalData;message:{title:string;text:string;action:string;reflection:string}};
-export type CurrentUser={id:string;name:string;email:string;role:'user'|'admin';twoFactorEnabled:boolean};
+export type CurrentUser={sessionBinding:string;id:string;name:string;username:string|null;email:string;role:'user'|'admin';twoFactorEnabled:boolean};
 export const DailyQuery:ZodType<{cursor?:string;limit:number}>;
 export const AdminPageQuery:ZodObject<{cursor:ZodOptional<ZodString>;limit:ZodDefault<ZodNumber>},'strict'>;
 export type ReadingQueryInput={cursor?:string;limit:number;q?:string;kind?:'tarot'|'iching';favorite?:boolean;tag?:string;dateFrom?:string;dateTo?:string};

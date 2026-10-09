@@ -1,0 +1,108 @@
+{
+  "name": "Publish fixed shared release 5028f27",
+  "on": {
+    "push": {
+      "branches": [
+        "feat/luminous-oracle-experience"
+      ],
+      "paths": [
+        ".github/workflows/publish-shared-5028f27.yml",
+        "scripts/publish-shared-5028f27.mjs",
+        "tests/publish-shared-5028f27.test.js",
+        "tests/publish-shared-workflow.test.js"
+      ]
+    }
+  },
+  "permissions": {},
+  "concurrency": {
+    "group": "publish-shared-5028f27",
+    "cancel-in-progress": false
+  },
+  "jobs": {
+    "verify": {
+      "if": "github.repository == '9theresa9/star-oracle' && github.event_name == 'push' && github.ref == 'refs/heads/feat/luminous-oracle-experience'",
+      "runs-on": "ubuntu-24.04",
+      "timeout-minutes": 15,
+      "permissions": {
+        "contents": "read",
+        "actions": "read"
+      },
+      "steps": [
+        {
+          "uses": "actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+          "with": {
+            "ref": "${{ github.sha }}",
+            "persist-credentials": false
+          }
+        },
+        {
+          "uses": "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+          "with": {
+            "node-version": 24
+          }
+        },
+        {
+          "name": "Test fixed evidence and publication boundaries",
+          "run": "node --test tests/publish-shared-5028f27.test.js tests/publish-shared-workflow.test.js"
+        },
+        {
+          "name": "Verify exact source, successful runs and original artifact bytes",
+          "run": "node scripts/publish-shared-5028f27.mjs verify",
+          "env": {
+            "GH_TOKEN": "${{ github.token }}"
+          }
+        },
+        {
+          "uses": "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
+          "with": {
+            "name": "approved-shared-5028f27",
+            "path": "${{ runner.temp }}/star-oracle-publish-5028f27/star-oracle-shared-linux-amd64-5028f27.zip\n${{ runner.temp }}/star-oracle-publish-5028f27/star-oracle-shared-linux-amd64-5028f27.zip.sha256",
+            "compression-level": 0,
+            "retention-days": 1,
+            "if-no-files-found": "error"
+          }
+        }
+      ]
+    },
+    "publish": {
+      "needs": "verify",
+      "if": "github.repository == '9theresa9/star-oracle' && github.event_name == 'push' && github.ref == 'refs/heads/feat/luminous-oracle-experience'",
+      "runs-on": "ubuntu-24.04",
+      "timeout-minutes": 15,
+      "permissions": {
+        "contents": "write",
+        "actions": "read"
+      },
+      "steps": [
+        {
+          "uses": "actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+          "with": {
+            "ref": "${{ github.sha }}",
+            "persist-credentials": false
+          }
+        },
+        {
+          "uses": "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+          "with": {
+            "node-version": 24
+          }
+        },
+        {
+          "uses": "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333",
+          "with": {
+            "name": "approved-shared-5028f27",
+            "path": "${{ runner.temp }}/star-oracle-publish-5028f27",
+            "digest-mismatch": "error"
+          }
+        },
+        {
+          "name": "Upload only the two fixed assets to the existing approved prerelease",
+          "run": "node scripts/publish-shared-5028f27.mjs publish",
+          "env": {
+            "GH_TOKEN": "${{ github.token }}"
+          }
+        }
+      ]
+    }
+  }
+}

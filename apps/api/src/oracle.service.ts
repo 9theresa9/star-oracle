@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { drawTarot,castCoinLine,castNumberLines,castTimeLines,validateReading,basicInterpretation,evidenceFor,TAROT_DECK,randomInt,dailyMessage,type Reading,type Interpretation,type ScenarioId } from '@star-oracle/domain';
 import type { CreateReadingInput,JournalData } from '@star-oracle/contracts';
 import { db,seal,open,consumeLimit,chinaDate } from './infrastructure.js';
-import { requestModel,initialInterpretationId } from './model.service.js';
+import { requestModel,modelRequestState,failedModelAttempt,initialInterpretationId,type ModelRequest } from './model.service.js';
 
 type Stored=Prisma.ReadingGetPayload<Record<string,never>>;
 export type ReadingFilters={cursor?:string;limit:number;q?:string;kind?:'tarot'|'iching';favorite?:boolean;tag?:string;dateFrom?:string;dateTo?:string};
@@ -34,6 +34,14 @@ function dateBoundary(date:string,end=false):Date {
  return end?new Date(start.getTime()+86400000):start;
 }
 type ConversationRow=Prisma.ReadingConversationGetPayload<Record<string,never>>;
+type ConversationInput=Pick<ModelRequest,'question'|'evidence'|'context'>;
+function conversationModelRequest(row:ConversationRow):ModelRequest {
+ if(!row.inputCipher)throw new ServiceUnavailableException('这条追问缺少恢复快照，请开始新的追问');
+ const snapshot=JSON.parse(open(row.inputCipher,'conversation-input:'+row.userId+':'+row.id)) as ConversationInput;
+ if(snapshot.question!==open(row.promptCipher,'conversation-prompt:'+row.userId+':'+row.id))throw new ConflictException('追问内容已改变，请刷新');
+ // Source/nonce identifiers always come from the owned row, never the snapshot.
+ return {userId:row.userId,requestId:row.requestId,readingId:row.readingId,conversationId:row.id,question:snapshot.question,evidence:snapshot.evidence,context:snapshot.context};
+}
 export function decodeConversation(row:ConversationRow) {
  return {id:row.id,prompt:open(row.promptCipher,'conversation-prompt:'+row.userId+':'+row.id),answer:row.answerCipher?JSON.parse(open(row.answerCipher,'conversation-answer:'+row.userId+':'+row.id)) as Interpretation:null,status:row.status,createdAt:row.createdAt.toISOString()};
 }
@@ -174,11 +182,17 @@ export class OracleService {
   return {items:rows.slice(0,limit).map(decodeConversation),nextCursor:rows.length>limit?rows[limit-1]!.id:null};
  }
  async followUp(userId:string,readingId:string,input:{prompt:string;requestId:string;consent:true},auditRequestId:string) {
-  const owned=await this.owned(userId,readingId),where={userId_requestId:{userId,requestId:input.requestId}};
+  await this.owned(userId,readingId);
+  const where={userId_requestId:{userId,requestId:input.requestId}};
   const previous=await db.readingConversation.findUnique({where});
   if(previous){
    if(previous.readingId!==readingId||decodeConversation(previous).prompt!==input.prompt.trim())throw new ConflictException('请求标识已用于其他追问');
    if(previous.status==='done')return decodeConversation(previous);
+   if(previous.inputCipher){
+    const model=await modelRequestState(conversationModelRequest(previous));
+    if(model.result)return this.saveConversation(previous,model.result,auditRequestId);
+    if(model.status==='failed'||(previous.status==='failed'&&model.status==='missing'))throw failedModelAttempt('本次追问未完成，请选择重新尝试');
+   }
    if(previous.status==='failed')throw new ServiceUnavailableException('本次追问未完成，请选择重新尝试');
    if(previous.pendingSince&&previous.pendingSince.getTime()<Date.now()-120000){
     await db.readingConversation.updateMany({where:{id:previous.id,status:'pending',pendingSince:previous.pendingSince},data:{status:'failed',pendingSince:null}});
@@ -192,29 +206,45 @@ export class OracleService {
   let row:ConversationRow;
   try{
    row=await db.$transaction(async tx=>{
-    const exists=await tx.reading.findFirst({where:{id:readingId,userId},select:{id:true}});
+    const exists=await tx.reading.findFirst({where:{id:readingId,userId}});
     if(!exists)throw new NotFoundException('记录不存在');
     const pending=await tx.readingConversation.findFirst({where:{userId,readingId,status:'pending',pendingSince:{gte:new Date(Date.now()-120000)}}});
     if(pending)throw new ConflictException('上一条追问正在生成，请稍后再问');
-    return tx.readingConversation.create({data:{id,userId,readingId,requestId:input.requestId,promptCipher:seal(input.prompt.trim(),'conversation-prompt:'+userId+':'+id),status:'pending',pendingSince:started}});
+    const record=decodeReading(exists);
+    const recent=await tx.readingConversation.findMany({where:{userId,readingId,status:'done'},orderBy:[{createdAt:'desc'},{id:'desc'}],take:6});
+    const context=JSON.stringify({originalQuestion:record.reading.question,originalInterpretation:{summary:record.interpretation.summary.slice(0,1000),reflection:record.interpretation.reflection.slice(0,300)},history:recent.reverse().map(item=>{const value=decodeConversation(item);return {prompt:value.prompt,answer:{summary:value.answer!.summary.slice(0,800),reflection:value.answer!.reflection.slice(0,200)}};})});
+    const snapshot:ConversationInput={question:input.prompt.trim(),evidence:evidenceFor(record.reading),context};
+    return tx.readingConversation.create({data:{id,userId,readingId,requestId:input.requestId,promptCipher:seal(snapshot.question,'conversation-prompt:'+userId+':'+id),inputCipher:seal(JSON.stringify(snapshot),'conversation-input:'+userId+':'+id),status:'pending',pendingSince:started}});
    },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});
   }catch(error){
    if(error instanceof Prisma.PrismaClientKnownRequestError&&(error.code==='P2002'||error.code==='P2034'))throw new ConflictException('这次追问已经开始，请稍后刷新');
    throw error;
   }
   try{
-   const record=decodeReading(owned);
-   const recent=await db.readingConversation.findMany({where:{userId,readingId,status:'done'},orderBy:[{createdAt:'desc'},{id:'desc'}],take:6});
-   const context=JSON.stringify({originalQuestion:record.reading.question,originalInterpretation:{summary:record.interpretation.summary.slice(0,1000),reflection:record.interpretation.reflection.slice(0,300)},history:recent.reverse().map(item=>{const value=decodeConversation(item);return {prompt:value.prompt,answer:{summary:value.answer!.summary.slice(0,800),reflection:value.answer!.reflection.slice(0,200)}};})});
-   const answer=await requestModel({userId,requestId:input.requestId,readingId,question:input.prompt.trim(),evidence:evidenceFor(record.reading),context});
-   await db.$transaction(async tx=>{
-    const changed=await tx.readingConversation.updateMany({where:{id,userId,readingId,status:'pending',pendingSince:started},data:{answerCipher:seal(JSON.stringify(answer),'conversation-answer:'+userId+':'+id),status:'done',pendingSince:null}});
-    if(changed.count!==1)throw new ConflictException('追问状态已改变，请刷新');
-    await tx.auditLog.create({data:{id:randomUUID(),actorId:userId,action:'reading.follow-up',targetId:readingId,requestId:auditRequestId}});
-   });
-   return decodeConversation(await db.readingConversation.findUniqueOrThrow({where:{id:row.id}}));
+   const answer=await requestModel(conversationModelRequest(row));
+   return await this.saveConversation(row,answer,auditRequestId);
   }catch(error){
    await db.readingConversation.updateMany({where:{id,userId,status:'pending',pendingSince:started},data:{status:'failed',pendingSince:null}}).catch(()=>{});
+   if(error instanceof HttpException)throw error;
+   throw new ServiceUnavailableException('追问暂时不可用，已有记录仍可查看');
+  }
+ }
+ private async saveConversation(row:ConversationRow,answer:Interpretation,auditRequestId:string) {
+  const {id,userId,readingId,requestId,inputCipher}=row;
+  try{
+   const saved=await db.$transaction(async tx=>{
+    const identity={id,userId,readingId,requestId,inputCipher};
+    const changed=await tx.readingConversation.updateMany({where:{...identity,status:{in:['pending','failed']}},data:{answerCipher:seal(JSON.stringify(answer),'conversation-answer:'+userId+':'+id),status:'done',pendingSince:null}});
+    if(changed.count!==1){
+     const completed=await tx.readingConversation.findFirst({where:{...identity,status:'done'}});
+     if(completed)return completed;
+     throw new ConflictException('追问状态已改变，请刷新');
+    }
+    await tx.auditLog.create({data:{id:randomUUID(),actorId:userId,action:'reading.follow-up',targetId:readingId,requestId:auditRequestId}});
+    return tx.readingConversation.findUniqueOrThrow({where:{id}});
+   });
+   return decodeConversation(saved);
+  }catch(error){
    if(error instanceof HttpException)throw error;
    throw new ServiceUnavailableException('追问暂时不可用，已有记录仍可查看');
   }

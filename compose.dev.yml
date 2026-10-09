@@ -1,5 +1,6 @@
 services:
   mysql:
+    logging: {driver: json-file, options: {max-size: "10m", max-file: "3"}}
     image: mysql:8.4
     environment:
       MYSQL_ROOT_PASSWORD: local-development-root
@@ -14,11 +15,9 @@ services:
       interval: 5s
       retries: 20
   redis:
+    logging: {driver: json-file, options: {max-size: "10m", max-file: "3"}}
     image: redis:7.4
     command: ["redis-server", "--requirepass", "local-development-redis"]
     ports: ["127.0.0.1:6379:6379"]
-  mail:
-    image: axllent/mailpit:v1.31.3
-    ports: ["127.0.0.1:1025:1025", "127.0.0.1:8025:8025"]
 volumes:
   mysql-dev:

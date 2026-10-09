@@ -12,7 +12,7 @@ export class AdminService {
   return {users,readings,dailyEntries:daily,aiRequestsToday:ai?.requests??0,aiDailyLimit:config.AI_DAILY_LIMIT,aiConfigured:!!config.AI_API_KEY,database:'ready',redis:await redis.ping()==='PONG'?'ready':'unavailable'};
  }
  async users({cursor,limit}:{cursor?:string;limit:number}) {
-  const rows=await db.user.findMany({take:limit+1,orderBy:[{createdAt:'desc'},{id:'desc'}],...(cursor?{cursor:{id:cursor},skip:1}:{}),select:{id:true,name:true,email:true,role:true,disabled:true,createdAt:true,membership:{select:{tier:true,expiresAt:true,credits:true}}}});
+  const rows=await db.user.findMany({take:limit+1,orderBy:[{createdAt:'desc'},{id:'desc'}],...(cursor?{cursor:{id:cursor},skip:1}:{}),select:{id:true,name:true,username:true,email:true,role:true,disabled:true,createdAt:true,membership:{select:{tier:true,expiresAt:true,credits:true}}}});
   return {items:rows.slice(0,limit),nextCursor:rows.length>limit?rows[limit-1]!.id:null};
  }
  async status(actorId:string,id:string,disabled:boolean,requestId:string) {
