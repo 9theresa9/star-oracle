@@ -4,7 +4,11 @@ import { randomUUID } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
 import { Redis } from 'ioredis';
 import { hashPassword, verifyPassword } from 'better-auth/crypto';
-import { normalizeUsername, provisionAccount, assignAccountUsername, resetAccountPassword } from '../src/maintenance/account-service.js';
+import { betterAuth } from 'better-auth';
+import { prismaAdapter } from 'better-auth/adapters/prisma';
+import { redisStorage } from '@better-auth/redis-storage';
+import { username } from 'better-auth/plugins';
+import { normalizeUsername, provisionAccount, assignAccountUsername, resetAccountPassword, revokeAllAccountSessions } from '../src/maintenance/account-service.js';
 
 const password = 'synthetic-password-only-123';
 const changedPassword = 'synthetic-changed-only-456';
@@ -151,6 +155,94 @@ describe('isolated offline account maintenance', () => {
   const refusesDelete = { get: redis.get.bind(redis), scan: redis.scan.bind(redis), del: async () => 0 } as any;
   await assert.rejects(resetAccountPassword(db, refusesDelete, { username: user.username!, password: changedPassword }), /Keep all API replicas stopped/);
   assert.equal(await db.session.count({ where: { userId: user.id } }), 1);
+ });
+ test('mode cutover clears all user sessions and verifications but preserves password and TOTP records byte for byte', async t => {
+  const f = fixture(t), enabled = await f.create(), legacy = await f.create();
+  await db.user.update({ where: { id: legacy.id }, data: { username: null, role: 'admin', disabled: true, twoFactorEnabled: true } });
+  await db.twoFactor.create({ data: { id: randomUUID(), userId: legacy.id, secret: 'synthetic-totp-kept', backupCodes: 'synthetic-backups-kept' } });
+  const snapshot = async () => ({
+   users: await db.user.findMany({ where: { id: { in: f.ids } }, orderBy: { id: 'asc' } }),
+   accounts: await db.account.findMany({ where: { userId: { in: f.ids } }, orderBy: { id: 'asc' } }),
+   twoFactors: await db.twoFactor.findMany({ where: { userId: { in: f.ids } }, orderBy: { id: 'asc' } }),
+  });
+  const before = await snapshot(), attempts: string[] = [];
+  t.after(async () => { await db.verification.deleteMany({ where: { identifier: { in: attempts } } }); });
+  for (const user of [enabled, legacy]) {
+   const token = randomUUID(), indexed = randomUUID(), orphan = randomUUID();
+   await db.session.create({ data: { id: randomUUID(), userId: user.id, token, expiresAt: new Date(Date.now() + 60_000) } });
+   await f.cache('auth:' + token, { session: { token } });
+   await f.cache('auth:' + indexed, { session: { token: indexed } });
+   await f.cache('auth:active-sessions-' + user.id, [{ token: indexed }]);
+   await f.cache('auth:' + orphan, { session: { userId: user.id }, user: { id: user.id } });
+   for (const prefix of ['2fa-', 'trust-device-']) {
+    const identifier = prefix + randomUUID(); attempts.push('2fa-attempts-' + identifier);
+    await db.verification.create({ data: { id: randomUUID(), identifier, value: user.id, expiresAt: new Date(Date.now() + 60_000) } });
+    await db.verification.create({ data: { id: randomUUID(), identifier: '2fa-attempts-' + identifier, value: '2', expiresAt: new Date(Date.now() + 60_000) } });
+    await f.cache('auth:verification:' + identifier, { identifier, value: user.id });
+    await f.cache('auth:verification:2fa-attempts-' + identifier, { value: '2' });
+   }
+  }
+  const loginLimit = 'limit:login:cutover-' + randomUUID(), authLimit = 'auth:rate-limit:cutover-' + randomUUID();
+  await f.cache(loginLimit, '4'); await f.cache(authLimit, { count: 4, lastRequest: Date.now() });
+  const preserved = new Map([[loginLimit, await redis.get(loginLimit)], [authLimit, await redis.get(authLimit)]]);
+  await revokeAllAccountSessions(db, redis);
+  assert.equal(await db.session.count(), 0);
+  assert.equal(await db.verification.count({ where: { value: { in: f.ids } } }), 0);
+  assert.equal(await db.verification.count({ where: { identifier: { in: attempts } } }), 0);
+  assert.deepEqual(await snapshot(), before);
+  for (const key of f.keys) assert.equal(await redis.get(key), preserved.get(key) ?? null, key);
+  for (const user of [enabled, legacy]) assert.equal(await db.auditLog.count({ where: { targetId: user.id, action: 'account.sessions-revoked.offline' } }), 1);
+ });
+ test('partial cutover Redis failure rolls back current user targets and permits a full offline retry', async t => {
+  const f = fixture(t), users = [await f.create(), await f.create()].sort((a, b) => a.id.localeCompare(b.id));
+  for (const user of users) {
+   const token = randomUUID();
+   await db.session.create({ data: { id: randomUUID(), userId: user.id, token, expiresAt: new Date(Date.now() + 60_000) } });
+   await f.cache('auth:' + token, { session: { token } });
+  }
+  const interrupted = {
+   get: async (key: string) => { if (key === 'auth:active-sessions-' + users[1]!.id) throw new Error('synthetic-private-provider-error'); return redis.get(key); },
+   scan: redis.scan.bind(redis), del: redis.del.bind(redis),
+  } as any;
+  await assert.rejects(revokeAllAccountSessions(db, interrupted), error => error instanceof Error && /Keep all API replicas stopped/.test(error.message) && !error.message.includes('private-provider'));
+  assert.equal(await db.session.count({ where: { userId: users[0]!.id } }), 0);
+  assert.equal(await db.session.count({ where: { userId: users[1]!.id } }), 1);
+  assert.equal(await db.auditLog.count({ where: { targetId: users[1]!.id, action: 'account.sessions-revoked.offline' } }), 0);
+  await revokeAllAccountSessions(db, redis);
+  assert.equal(await db.session.count(), 0);
+  for (const key of f.keys) assert.equal(await redis.get(key), null);
+ });
+ test('offline cutover rejects an old signed cookie relabeled into the SSH cookie family, then allows fresh login', async t => {
+  // No network server is started: only these sequential fixture auth calls can
+  // write, and none run while the offline maintenance operation is in progress.
+  const f = fixture(t), user = await f.create();
+  const secret = 'synthetic-cutover-shared-auth-secret-1234567890';
+  const instance = (cookiePrefix: string, secure: boolean, baseURL: string) => betterAuth({
+   logger: { disabled: true }, baseURL, secret,
+   database: prismaAdapter(db, { provider: 'mysql' }), secondaryStorage: redisStorage({ client: redis, keyPrefix: 'auth:' }),
+   emailAndPassword: { enabled: true, disableSignUp: true }, plugins: [username({ displayUsername: false })],
+   session: { storeSessionInDatabase: true, cookieCache: { enabled: false } },
+   advanced: { cookiePrefix, useSecureCookies: secure }, rateLimit: { enabled: false },
+  });
+  const legacyAuth = instance('better-auth', true, 'https://cutover.example.invalid');
+  const sshAuth = instance('star-oracle-ssh', false, 'http://localhost:17777');
+  const login = async (auth: typeof legacyAuth, cookieName: string) => {
+   const response = await auth.api.signInUsername({ body: { username: user.username!, password }, asResponse: true });
+   assert.equal(response.status, 200);
+   const data = await response.json() as { token: string };
+   f.keys.push('auth:' + data.token, 'auth:active-sessions-' + user.id);
+   const cookie = response.headers.getSetCookie().find(value => value.startsWith(cookieName + '='));
+   assert.ok(cookie, 'sign-in must issue the expected session cookie');
+   return cookie.split(';')[0]!;
+  };
+  const oldCookie = await login(legacyAuth, '__Secure-better-auth.session_token');
+  const relabeled = oldCookie.replace('__Secure-better-auth.session_token=', 'star-oracle-ssh.session_token=');
+  assert.equal((await sshAuth.api.getSession({ headers: new Headers({ cookie: relabeled }) }))?.user.id, user.id, 'cookie renaming alone must not be treated as revocation');
+  await revokeAllAccountSessions(db, redis);
+  assert.equal(await legacyAuth.api.getSession({ headers: new Headers({ cookie: oldCookie }) }), null);
+  assert.equal(await sshAuth.api.getSession({ headers: new Headers({ cookie: relabeled }) }), null);
+  const freshCookie = await login(sshAuth, 'star-oracle-ssh.session_token');
+  assert.equal((await sshAuth.api.getSession({ headers: new Headers({ cookie: freshCookie }) }))?.user.id, user.id);
  });
 });
 

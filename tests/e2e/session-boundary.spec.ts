@@ -33,8 +33,8 @@ test('same verified session keeps a draft when returning to the tab',async({page
  await page.evaluate(()=>window.dispatchEvent(new Event('focus')));
  await expect(page.getByLabel('此刻，你想探索什么？')).toHaveValue('Keep this unsaved question');
 });
-test('real cookie account switch clears another tab and rejects its old actor',async({context,page})=>{
- const origin='http://localhost:5173',password='Synthetic-private-test-password';
+test('real cookie account switch clears another tab and rejects its old actor',async({context,page,baseURL})=>{
+ const origin=baseURL!,password='Synthetic-private-test-password';
  const usernameA='synthetic-cross-a-'+crypto.randomUUID().replaceAll('-','').slice(0,12),usernameB='synthetic-cross-b-'+crypto.randomUUID().replaceAll('-','').slice(0,12);
  await provisionBrowserAccount(usernameA,'Synthetic A',password);await provisionBrowserAccount(usernameB,'Synthetic B',password);
  await page.goto('/account');await page.getByLabel('用户名',{exact:true}).fill(usernameA);await page.getByLabel('密码',{exact:true}).fill(password);await page.getByRole('button',{name:'登录',exact:true}).click();await expect(page.locator('.daily-letter')).toBeVisible();

@@ -1,5 +1,7 @@
 # 部署与迁移到国内服务器
 
+本页描述默认的公开 HTTPS 部署。长期仅通过 SSH 访问、浏览器使用 `http://localhost:17777` 的正式环境，请使用独立的 [SSH-only 部署说明](SSH_DEPLOYMENT.md)。该模式无需域名、CA 或 SMTP，仍要求专用数据库/Redis、真实凭据、密码/TOTP 和网络验收；不能把下列公网 Compose 文件与 SSH 文件叠加，也不能用开发模式代替。
+
 ## 运行条件
 
 建议 Ubuntu 24.04 / Debian 12，2 核 4GB 起步；持续使用建议 4 核 8GB。安装受支持的 Docker Engine 与 Compose 插件。生产只向公网开放 80、443；SSH 按来源限制。MySQL、Redis、API 与静态容器均无宿主机端口映射。

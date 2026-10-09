@@ -22,7 +22,7 @@ export const auth=betterAuth({
   // Credentials are created offline. Email is retained only for legacy schema compatibility.
   // The HTTP dispatcher denies every email/profile/recovery route, not just registration UI.
   emailAndPassword:{enabled:true,disableSignUp:true,minPasswordLength:12,maxPasswordLength:128,requireEmailVerification:false},
-  advanced:{useSecureCookies:config.NODE_ENV==='production',defaultCookieAttributes:{httpOnly:true,sameSite:'lax',path:'/'},
+  advanced:{useSecureCookies:config.SECURE_COOKIES,cookiePrefix:config.COOKIE_PREFIX,defaultCookieAttributes:{secure:config.SECURE_COOKIES,httpOnly:true,sameSite:'lax',path:'/'},
     ipAddress:{ipAddressHeaders:['x-real-ip']}},
   rateLimit:{enabled:true,storage:'secondary-storage',window:60,max:30,
     customRules:{'/sign-in/username':{window:60,max:5}}},

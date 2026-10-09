@@ -5,7 +5,19 @@ umask 077
 command -v age >/dev/null
 command -v docker >/dev/null
 repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-env_file="${ENV_FILE:-$repo_dir/.env.production}"
+case "${BACKUP_DEPLOYMENT_MODE:-https}" in
+  https)
+    env_file="${ENV_FILE:-$repo_dir/.env.production}"
+    compose=(docker compose --env-file "$env_file" -f "$repo_dir/compose.yml")
+    ;;
+  ssh-only)
+    env_file="${ENV_FILE:-$repo_dir/.env.ssh}"
+    # A backup is read-only against this fixed project. Never inherit another
+    # stack/context or merge in the public gateway configuration.
+    compose=(node "$repo_dir/scripts/ssh-dump.mjs" "$env_file")
+    ;;
+  *) printf 'Unknown backup deployment mode\n' >&2; exit 1 ;;
+esac
 backup_dir="${BACKUP_DIR:-$repo_dir/backups}"
 mkdir -p -- "$backup_dir"
 # Keep incomplete ciphertext private and unpublished. A failed dump can still
@@ -14,7 +26,10 @@ partial="$(mktemp "$backup_dir/.star-oracle-$(date -u +%Y%m%dT%H%M%SZ)-XXXXXX.pa
 trap 'rm -f -- "$partial"' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
-docker compose --env-file "$env_file" -f "$repo_dir/compose.yml" exec -T mysql sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysqldump -uroot --single-transaction --no-tablespaces --set-gtid-purged=OFF star_oracle' \
+if [[ "${BACKUP_DEPLOYMENT_MODE:-https}" == https ]]; then
+  compose+=(exec -T mysql sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysqldump -uroot --single-transaction --no-tablespaces --set-gtid-purged=OFF star_oracle')
+fi
+"${compose[@]}" \
   | gzip -n | age -r "$AGE_RECIPIENT" > "$partial"
 test -s "$partial"
 filename="${partial##*/}"

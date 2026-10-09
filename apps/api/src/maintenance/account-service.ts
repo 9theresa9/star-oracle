@@ -137,6 +137,44 @@ async function revokeCache(redis: AccountRedis, userId: string, tokens: string[]
 }
 
 /**
+ * OFFLINE MODE CUTOVER: stop and drain ALL API replicas and authentication
+ * writers before calling, and keep them stopped until this command succeeds.
+ * Cookie names do not bind session signatures to a deployment mode. Revoke the
+ * underlying sessions instead of rotating AUTH_SECRET, which also protects TOTP.
+ *
+ * Each user's DB changes commit only after verified targeted Redis revocation.
+ * On failure, earlier users may already be signed out; the failed user's DB
+ * references survive rollback, so retry the whole command while still offline.
+ * This intentionally never updates users, password credentials or TwoFactor.
+ */
+export async function revokeAllAccountSessions(db: PrismaClient, redis: AccountRedis): Promise<void> {
+ try {
+  // Include disabled users and legacy users without usernames or credentials.
+  const users = await db.user.findMany({ select: { id: true }, orderBy: { id: 'asc' } });
+  for (const user of users) {
+   await db.$transaction(async tx => {
+    const sessions = await tx.session.findMany({ where: { userId: user.id }, select: { token: true } });
+    const verifications = await tx.verification.findMany({ where: { value: user.id }, select: { identifier: true } });
+    const identifiers = verifications.map(value => value.identifier);
+    await tx.session.deleteMany({ where: { userId: user.id } });
+    await tx.verification.deleteMany({ where: { OR: [{ value: user.id }, { identifier: { in: identifiers.map(value => '2fa-attempts-' + value) } }] } });
+    await revokeCache(redis, user.id, sessions.map(session => session.token), identifiers);
+    if (await tx.session.count({ where: { userId: user.id } }) || await tx.verification.count({ where: { value: user.id } })) throw new Error('Revocation incomplete');
+    await tx.auditLog.create({ data: auditData('account.sessions-revoked.offline', user.id) });
+   }, { maxWait: 10_000, timeout: 120_000 });
+  }
+  // Verify again after all commits, including cache-only/orphan sessions. Never
+  // claim the cutover is complete merely because each delete returned success.
+  if (await db.session.count() || await db.verification.count({ where: { value: { in: users.map(user => user.id) } } })) throw new Error('Revocation incomplete');
+  for (const user of users) {
+   if (await redis.get('auth:active-sessions-' + user.id) !== null || (await scanOwnedCache(redis, user.id)).size !== 0) throw new Error('Revocation incomplete');
+  }
+ } catch {
+  safe('All-session revocation did not complete verification. Keep all API replicas stopped; correct the database or Redis problem and retry revoke-all-sessions.');
+ }
+}
+
+/**
  * OFFLINE ONLY: stop and drain ALL API replicas and other authentication writers
  * before calling, keeping MySQL and Redis running. Restart only after success.
  * Online resets are unsupported: a concurrent login could create new credentials

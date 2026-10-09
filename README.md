@@ -1,10 +1,10 @@
-> 当前 PR #5 新增预创建用户名/密码登录；邮件登录/注册/验证/找回已关闭。账号初始化与旧账号迁移见 [ACCOUNTS.md](docs/ACCOUNTS.md)。
+> 当前 PR #5 提供预创建用户名/密码登录，以及默认关闭的长期 SSH-only 部署模式；邮件登录/注册/验证/找回已关闭。账号初始化与旧账号迁移见 [ACCOUNTS.md](docs/ACCOUNTS.md)，无域名的 SSH 入口见 [SSH_DEPLOYMENT.md](docs/SSH_DEPLOYMENT.md)。
 
 # 照见 · Star Oracle
 
 独立 React 前端 + NestJS API + MySQL 8.4 + Redis 7.4，提供塔罗、易经、学习图鉴、私人记录与管理后台，适配桌面和手机。
 
-完整功能基线保留在 `feat/comprehensive-oracle` / [PR #4](https://github.com/9theresa9/star-oracle/pull/4)。当前视觉、安全与用户名认证改版在 `feat/luminous-oracle-experience` / [PR #5](https://github.com/9theresa9/star-oracle/pull/5)，基于该完整基线，尚未合并或部署。[分支说明](docs/BRANCHES.md) 与 [实际界面](docs/REVIEW_SCREENSHOTS.md) 可直接查看。GitHub review 不会自动修改主分支或已部署的 Worker 原型；新版正式上线仍需服务器、域名、预创建账户、模型凭据与环境验收。
+完整功能基线保留在 `feat/comprehensive-oracle` / [PR #4](https://github.com/9theresa9/star-oracle/pull/4)。当前视觉、安全与用户名认证改版在 `feat/luminous-oracle-experience` / [PR #5](https://github.com/9theresa9/star-oracle/pull/5)，基于该完整基线，尚未合并或部署。[分支说明](docs/BRANCHES.md) 与 [实际界面](docs/REVIEW_SCREENSHOTS.md) 可直接查看。GitHub review 不会自动修改主分支或已部署的 Worker 原型；正式上线仍需服务器资源、隔离数据库/Redis、凭据、预创建账户与所选入口验收。公开入口必须使用 HTTPS；经明确选择的 SSH-only 模式无需域名或 CA，限制见专门文档。
 
 ## 功能
 
@@ -26,7 +26,7 @@
 - MySQL：用户、会话索引、永久记录、会员、额度账本、审计和AI持久预算。
 - Redis：认证短期数据、跨实例限流和AI并发租约。
 
-依赖锁与SQL迁移已提交；CI使用 `npm ci` 和已提交迁移，仓库权限只读；生产不执行 schema push。Docker Compose 可以启动整套系统，但首次仍需正确配置域名、密钥与外部服务。
+依赖锁与SQL迁移已提交；CI使用 `npm ci` 和已提交迁移，仓库权限只读；生产不执行 schema push。公网 HTTPS 与 SSH-only 使用不同的部署文件，不能合并启动。CI 可输出经过验证的镜像归档，无需服务器构建或新建镜像仓库。
 
 [部署说明](docs/DEPLOYMENT.md) · [架构取舍](docs/ARCHITECTURE.md) · [安全与隐私](docs/SECURITY.md) · [备份运维](docs/OPERATIONS.md) · [API规范](docs/openapi.json) · [Review与验证记录](docs/REVIEW.md)
 
@@ -34,10 +34,10 @@
 
 1. 安装 Node.js 24 与 Docker Compose。
 2. 复制 `.env.example` 为 `.env`。
-3. 启动开发数据库、Redis与邮件服务：`docker compose -f compose.dev.yml up -d`。
+3. 启动开发数据库与 Redis：`docker compose -f compose.dev.yml up -d`。
 4. `npm ci`，`npm run db:generate`，加载环境变量后 `npm run db:migrate`。
 5. 加载环境变量后 `npm run dev:api`；另一个终端 `npm run dev:web`。
-6. 打开 http://localhost:5173；开发邮件在 http://localhost:8025 查看。
+6. 在 API 停止时按账户维护文档预建账号；启动后打开 http://localhost:5173。无需邮件服务。
 
 推荐使用 `node --env-file=.env` 启动已构建API；开发命令加载方法详见部署文档。不把.env、密钥或正式用户数据提交到仓库。
 

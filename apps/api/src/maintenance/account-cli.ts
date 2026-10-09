@@ -3,12 +3,12 @@ import { pathToFileURL } from 'node:url';
 import type { ReadStream, WriteStream } from 'node:tty';
 import type { PrismaClient } from '@prisma/client';
 import {
- AccountMaintenanceError, provisionAccount, assignAccountUsername, resetAccountPassword,
+ AccountMaintenanceError, provisionAccount, assignAccountUsername, resetAccountPassword, revokeAllAccountSessions,
  normalizeUsername, validatePassword, validateAccountName, validateUserId, type AccountRedis,
 } from './account-service.js';
 
 type Terminal = { input: ReadStream; output: WriteStream };
-type Command = 'create' | 'assign-username' | 'reset-password';
+type Command = 'create' | 'assign-username' | 'reset-password' | 'revoke-all-sessions';
 type Resources = { db: PrismaClient; redis?: AccountRedis; close(): Promise<void> };
 type CliOptions = Terminal & { connect?: (command: Command) => Promise<Resources> };
 function fail(message: string): never { throw new AccountMaintenanceError(message); }
@@ -61,13 +61,13 @@ async function connectResources(command: Command): Promise<Resources> {
  try {
   const database = new URL(process.env.DATABASE_URL ?? '');
   if (database.protocol !== 'mysql:') fail('Maintenance requires DATABASE_URL for MySQL.');
-  if (command === 'reset-password') {
+  if (command === 'reset-password' || command === 'revoke-all-sessions') {
    const cache = new URL(process.env.REDIS_URL ?? '');
-   if (!['redis:', 'rediss:'].includes(cache.protocol)) fail('Password reset requires REDIS_URL.');
+   if (!['redis:', 'rediss:'].includes(cache.protocol)) fail('Session revocation requires REDIS_URL. Keep all API replicas stopped.');
   }
   const { PrismaClient } = await import('@prisma/client');
   db = new PrismaClient({ log: [] }); await db.$connect();
-  if (command === 'reset-password') {
+  if (command === 'reset-password' || command === 'revoke-all-sessions') {
    const { Redis } = await import('ioredis');
    redis = new Redis(process.env.REDIS_URL!, { lazyConnect: true, enableOfflineQueue: false, maxRetriesPerRequest: 1, connectTimeout: 5000, retryStrategy: () => null });
    redis.on('error', () => { /* Provider errors can contain credentials. */ }); await redis.connect();
@@ -84,31 +84,32 @@ export async function runAccountCli(args: string[], options: CliOptions = { inpu
  const { input, output } = options; let resources: Resources | undefined;
  const ignoreOutputError = () => {}; output.on('error', ignoreOutputError);
  try {
-  if (args.length !== 1 || !['create', 'assign-username', 'reset-password'].includes(args[0]!)) fail('Usage: account-cli create|assign-username|reset-password. Enter all account details interactively; arguments, environment variables, files and pipes are not accepted for credentials.');
+  if (args.length !== 1 || !['create', 'assign-username', 'reset-password', 'revoke-all-sessions'].includes(args[0]!)) fail('Usage: account-cli create|assign-username|reset-password|revoke-all-sessions. Enter all account details interactively; arguments, environment variables, files and pipes are not accepted for credentials.');
   if (!input.isTTY || !output.isTTY || typeof input.setRawMode !== 'function') fail('An interactive terminal is required; redirected or piped account details are not accepted.');
   const command = args[0] as Command, io = { input, output };
   const userId = command === 'assign-username' ? validateUserId((await promptLine(io, 'Existing user ID: ')).trim()) : undefined;
-  const username = normalizeUsername(await promptLine(io, 'Username: '));
+  const username = command !== 'revoke-all-sessions' ? normalizeUsername(await promptLine(io, 'Username: ')) : undefined;
   const name = command === 'create' ? validateAccountName(await promptLine(io, 'Display name: ')) : undefined;
   let password: string | undefined;
-  if (command !== 'assign-username') {
+  if (command === 'create' || command === 'reset-password') {
    password = await promptLine(io, 'Password (hidden): ', true); validatePassword(password);
    if (password !== await promptLine(io, 'Confirm password (hidden): ', true)) fail('Passwords do not match.');
   }
   output.write('Stop and drain ALL API replicas and authentication writers. Keep MySQL and Redis running. Online maintenance is unsupported.\n');
-  output.write('Operation: ' + command + '; username: ' + username + (userId ? '; user ID: ' + userId : '') + '.\n');
+  output.write('Operation: ' + command + (command === 'revoke-all-sessions' ? '; ALL accounts, including disabled and legacy accounts' : '; username: ' + username + (userId ? '; user ID: ' + userId : '')) + '.\n');
   if (await promptLine(io, 'Type STOPPED to confirm all API replicas are stopped: ') !== 'STOPPED') fail('Operation cancelled; offline acknowledgement was not given.');
-  const target = userId ?? username;
+  const target = command === 'revoke-all-sessions' ? 'ALL' : userId ?? username;
   if (await promptLine(io, 'Type ' + target + ' to confirm this operation target: ') !== target) fail('Operation cancelled; target confirmation did not match.');
   resources = await (options.connect ?? connectResources)(command);
-  if (command === 'create') await provisionAccount(resources.db, { username, name: name!, password: password! });
-  else if (command === 'assign-username') await assignAccountUsername(resources.db, { userId: userId!, username });
+  if (command === 'create') await provisionAccount(resources.db, { username: username!, name: name!, password: password! });
+  else if (command === 'assign-username') await assignAccountUsername(resources.db, { userId: userId!, username: username! });
   else {
    if (!resources.redis) fail('Redis is required. Keep all API replicas stopped.');
-   await resetAccountPassword(resources.db, resources.redis, { username, password: password! });
+   if (command === 'revoke-all-sessions') await revokeAllAccountSessions(resources.db, resources.redis);
+   else await resetAccountPassword(resources.db, resources.redis, { username: username!, password: password! });
   }
   password = undefined;
-  output.write(command === 'reset-password' ? 'Password reset and targeted session revocation verified. API replicas may now restart.\n' : 'Account maintenance completed. API replicas may now restart.\n');
+  output.write(command === 'revoke-all-sessions' ? 'All account sessions, pending challenges and trusted devices revoked and verified. API replicas may now restart.\n' : command === 'reset-password' ? 'Password reset and targeted session revocation verified. API replicas may now restart.\n' : 'Account maintenance completed. API replicas may now restart.\n');
   return 0;
  } catch (error) {
   // Do not print arbitrary exception text/stack, submitted values, URLs or hashes.

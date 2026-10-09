@@ -1,0 +1,129 @@
+# Standalone file. Never merge this with the public HTTPS or development Compose.
+name: star-oracle-ssh
+x-common: &common
+  restart: 'no'
+  security_opt: [no-new-privileges:true]
+  labels: {io.star-oracle.deployment: ssh-only}
+  cpus: 1
+  pids_limit: 256
+  logging: {driver: json-file, options: {max-size: '10m', max-file: '3'}}
+x-api: &api
+  <<: *common
+  image: star-oracle-api:local
+  read_only: true
+  tmpfs: [/tmp]
+  cap_drop: [ALL]
+  mem_limit: 512m
+services:
+  mysql:
+    <<: *common
+    image: mysql:8.4
+    mem_limit: 768m
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: star_oracle
+      MYSQL_USER: oracle
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Set MYSQL_PASSWORD}
+      MYSQL_MIGRATION_PASSWORD: ${MYSQL_MIGRATION_PASSWORD:?Set MYSQL_MIGRATION_PASSWORD}
+    command: [--character-set-server=utf8mb4, --collation-server=utf8mb4_unicode_ci]
+    volumes: [mysql-data:/var/lib/mysql, ./infra/mysql-init.sh:/docker-entrypoint-initdb.d/10-privileges.sh:ro]
+    networks: {backend: {ipv4_address: 172.30.78.4}}
+    healthcheck:
+      test: [CMD-SHELL, 'MYSQL_PWD=$$MYSQL_PASSWORD mysqladmin ping -h 127.0.0.1 -uoracle --silent']
+      interval: 5s
+      timeout: 5s
+      retries: 40
+  redis:
+    <<: *common
+    image: redis:7.4
+    mem_limit: 192m
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD}
+    command: [sh, -c, 'exec redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy noeviction --requirepass "$$REDIS_PASSWORD"']
+    volumes: [redis-data:/data]
+    networks: {backend: {ipv4_address: 172.30.78.5}}
+    healthcheck:
+      test: [CMD-SHELL, 'REDISCLI_AUTH=$$REDIS_PASSWORD redis-cli ping']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  migrate:
+    <<: *api
+    environment:
+      DATABASE_URL: mysql://oracle_migrator:${MYSQL_MIGRATION_PASSWORD:?Set MYSQL_MIGRATION_PASSWORD}@mysql:3306/star_oracle
+    command: [npm, run, 'db:migrate', -w, '@star-oracle/api']
+    networks: {backend: {ipv4_address: 172.30.78.6}}
+    depends_on:
+      mysql: {condition: service_healthy}
+  api:
+    <<: *api
+    environment:
+      NODE_ENV: production
+      DEPLOYMENT_MODE: ssh-only
+      SSH_ONLY_CONTAINER: 'true'
+      PORT: '3001'
+      WEB_ORIGIN: http://localhost:17777
+      API_PUBLIC_URL: http://localhost:17777
+      TRUST_PROXY: 'false'
+      ADMIN_REQUIRE_2FA: 'true'
+      DATABASE_URL: mysql://oracle:${MYSQL_PASSWORD:?Set MYSQL_PASSWORD}@mysql:3306/star_oracle
+      REDIS_URL: redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD}@redis:6379
+      AUTH_SECRET: ${AUTH_SECRET:?Set AUTH_SECRET}
+      DATA_ENCRYPTION_KEY: ${DATA_ENCRYPTION_KEY:?Set DATA_ENCRYPTION_KEY}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_BASE_URL: ${AI_BASE_URL:-https://api.deepseek.com/v1}
+      AI_PROVIDER_NAME: ${AI_PROVIDER_NAME:-DeepSeek}
+      AI_MODEL: ${AI_MODEL:-deepseek-chat}
+      AI_DAILY_LIMIT: ${AI_DAILY_LIMIT:-200}
+    networks: {ssh: {ipv4_address: 172.30.77.2}, backend: {ipv4_address: 172.30.78.2}}
+    depends_on:
+      mysql: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3001/api/v1/health',{headers:{Host:'localhost:17777'}}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+  web:
+    <<: *common
+    image: star-oracle-web:local
+    command: [nginx, -c, /etc/nginx/ssh.conf, -g, 'daemon off;']
+    mem_limit: 128m
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    ports: ['127.0.0.1:17777:8080']
+    networks: {ssh: {ipv4_address: 172.30.77.3}}
+    depends_on:
+      api: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, '--header=Host: localhost:17777', 'http://127.0.0.1:8080/']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+networks:
+  ssh:
+    name: star-oracle-ssh-private
+    driver: bridge
+    enable_ipv6: false
+    # NAT permits outbound model API requests. Ingress is separately restricted
+    # by loopback publication, nginx peer ACL and the API's exact peer guard.
+    driver_opts:
+      com.docker.network.bridge.host_binding_ipv4: 127.0.0.1
+      com.docker.network.bridge.gateway_mode_ipv4: nat
+    ipam:
+      config: [{subnet: 172.30.77.0/24, gateway: 172.30.77.1}]
+  backend:
+    name: star-oracle-ssh-backend
+    driver: bridge
+    internal: true
+    enable_ipv6: false
+    driver_opts:
+      com.docker.network.bridge.host_binding_ipv4: 127.0.0.1
+      com.docker.network.bridge.gateway_mode_ipv4: nat
+    ipam:
+      config: [{subnet: 172.30.78.0/24, gateway: 172.30.78.1}]
+volumes:
+  mysql-data: {name: star-oracle-ssh-mysql-data}
+  redis-data: {name: star-oracle-ssh-redis-data}

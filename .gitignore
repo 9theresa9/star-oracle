@@ -4,6 +4,7 @@ dist/
 .env.*
 !.env.example
 !.env.production.example
+!.env.ssh.example
 *.log
 coverage/
 playwright-report/

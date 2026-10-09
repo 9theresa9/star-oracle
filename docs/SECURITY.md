@@ -6,7 +6,7 @@
 |---|---|
 | 伪造用户、角色或读取他人记录 | Better Auth 会话；每次 API 从 MySQL 核验当前用户、disabled、真实 session；每条记录查询含 userId；公开注册和在线身份字段修改关闭 |
 | 停用/降权后旧会话继续生效 | 停用事务删除 session；角色每次从 DB 读取；不使用 15 分钟仍可用的静态角色 JWT |
-| 浏览器令牌泄漏 / CSRF | HttpOnly + Secure(生产) + SameSite=Lax；禁用 cookie 会话缓存；固定可信来源；业务写请求要求准确 Origin 和 JSON；不会把 bearer 写到 localStorage |
+| 浏览器令牌泄漏 / CSRF | HttpOnly + SameSite=Lax；公开 HTTPS 生产必须 Secure；明确选择的 SSH-only 模式使用独立非 Secure cookie 家族与回环 SSH 入口；禁用 cookie 会话缓存；固定可信来源；业务写请求要求准确 Origin 和 JSON；不会把 bearer 写到 localStorage |
 | 管理员账户被盗 | 生产必须启用已确认的 TOTP；一次性恢复码；服务器离线提权并撤销旧会话；普通管理员账户不能由前台停用或删除 |
 | 注入与非法输入 | Zod 严格字段、UUID、长度与页大小；Prisma 参数化查询；React 默认转义；不渲染模型 HTML；公开前端 CSP / frame 限制 |
 | 私密正文泄漏 | 问题、日记、解读、备注/标签、追问、行动、反馈/回复、回顾输入/输出及内部AI结果使用AES-256-GCM + 所属用户/记录/字段AAD；管理员只读主动共享内容及主动提交的反馈；技术日志与审计不保存正文 |
@@ -21,6 +21,8 @@
 | 运维失误 | 启动拒绝不安全生产配置；持久卷、加密备份、密钥单独保管、恢复/回退说明；不用数据库管理工具暴露公网 |
 
 ## 私密数据与回顾快照生命周期
+
+SSH-only 的完整边界见 [部署文档](SSH_DEPLOYMENT.md)：实际连接来源、Docker 网络与端口绑定都需验证，Host/Origin 不代替网络隔离。SSH 加密电脑到服务器之间的隧道，本机 HTTP 不防本机恶意进程；localhost cookie 不按端口隔离。独立 cookie 名称只防冲突，已有环境切换模式必须停机撤销会话与认证挑战，不能只改 cookie 名字或直接轮换加密 TOTP 的 AUTH_SECRET。默认公开 HTTPS 模式不受此例外影响。
 
 私密正文以应用层AES-256-GCM保存，包括Reading问题/初次解读/备注/标签、DailyEntry日记、ReadingConversation问题/回答、ActionPlan标题/详情、Feedback正文/管理员回复、ReviewReport输入快照/结果、AIRequest内部结果。AAD绑定用户、记录和字段，不能把甲用户密文移到乙用户记录使用。用户名、昵称、旧账户邮箱/新账户内部非投递标识、心情类别、日期、类型、期限、共享标记和统计字段并非全部密文；管理端仅使用其授权需要的基本信息或聚合统计。这不是端到端加密。
 
@@ -40,7 +42,7 @@ requestId作用域是本人；来源Reading/ReviewReport与问题、证据、上
 
 ## PWA与浏览器持久缓存
 
-Service Worker仅为公开静态外壳提供离线回退；缓存版本升级会清除旧public缓存。/api/、/auth/、带查询串或token路径、外部来源、非GET不进入持久缓存。静态资产只允许白名单与带内容哈希的文件，获取时credentials:omit；私人导航离线返回不缓存的503提示，不回退为私人页面。安装需要HTTPS，iPhone通过Safari添加到主屏幕；私人记录与AI服务需要联网。此控制描述的是Service Worker CacheStorage，不能代替会话隔离或服务器权限。
+Service Worker仅为公开静态外壳提供离线回退；缓存版本升级会清除旧public缓存。/api/、/auth/、带查询串或token路径、外部来源、非GET不进入持久缓存。静态资产只允许白名单与带内容哈希的文件，获取时credentials:omit；私人导航离线返回不缓存的503提示，不回退为私人页面。公开部署的安装需要 HTTPS；SSH-only 的 localhost 安装支持取决于浏览器，且每台设备必须自己建立 SSH 隧道，电脑的 localhost 地址不能直接供手机使用。私人记录与 AI 服务需要连接到服务器。此控制描述的是Service Worker CacheStorage，不能代替会话隔离或服务器权限。
 
 ## 测试应包含的证据
 

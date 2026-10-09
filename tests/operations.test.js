@@ -1,12 +1,24 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, existsSync, statSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, existsSync, statSync,chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { gzipSync } from 'node:zlib';
 
 const root = resolve(import.meta.dirname, '..');
+
+test('SSH backup delegates to the validated SSH dumper without exposing credentials or merging the public stack', t => {
+ const f=fixture(t,{BACKUP_DEPLOYMENT_MODE:'ssh-only',COMPOSE_FILE:'/tmp/untrusted-compose.yml',COMPOSE_PROJECT_NAME:'other-app'});
+ writeFileSync(f.env.ENV_FILE,['MYSQL_ROOT_PASSWORD','MYSQL_PASSWORD','MYSQL_MIGRATION_PASSWORD','REDIS_PASSWORD','AUTH_SECRET','DATA_ENCRYPTION_KEY'].map((key,index)=>key+'='+String(index+1).repeat(64)).join('\n')+'\n');chmodSync(f.env.ENV_FILE,0o600);
+ const result=f.run('backup.sh');assert.equal(result.status,0,result.stderr);
+ const dump=f.events().find(e=>e.kind==='node');
+ assert.ok(dump);assert.deepEqual(dump.args,[join(root,'scripts/ssh-dump.mjs'),f.env.ENV_FILE]);
+ assert.equal(f.events().filter(e=>e.kind==='docker').length,0);f.assertOriginal();
+});
+test('backup refuses an unknown deployment mode before contacting Docker',t=>{
+ const f=fixture(t,{BACKUP_DEPLOYMENT_MODE:'guess'});assert.notEqual(f.run('backup.sh').status,0);assert.deepEqual(f.events(),[]);
+});
 
 // Real bash scripts and real gzip; only unavailable external age/Docker boundaries
 // are simulated. These tests do NOT assert cryptographic or container behavior.
@@ -23,7 +35,9 @@ function fixture(t, overrides = {}) {
 const fs = require('node:fs');
 const args = process.argv.slice(2), kind = process.argv[1].split('/').pop();
 const log = event => fs.appendFileSync(process.env.EVENTS, JSON.stringify(event) + '\\n');
-if (kind === 'age') {
+if (kind === 'node') {
+  log({kind:'node',args});process.stdout.write('CREATE TABLE old_table (id INT);\\n');
+} else if (kind === 'age') {
   if (args.includes('-d')) {
     process.stdout.write(fs.readFileSync(args.at(-1)));
     log({kind:'age', event:'decrypt-output'});
@@ -58,7 +72,7 @@ if (kind === 'age') {
   if(args.includes('up') && args.includes('api') && process.env.HEALTH_FAIL==='1') process.exit(1);
 }
 `;
-  for (const tool of ['age', 'docker']) writeFileSync(join(bin, tool), stub, { mode: 0o700 });
+  for (const tool of ['age', 'docker','node']) writeFileSync(join(bin, tool), stub, { mode: 0o700 });
   const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: join(dir, 'temp'),
     AGE_IDENTITY_FILE: join(dir, 'identity'), AGE_RECIPIENT: 'FAKE-PUBLIC-RECIPIENT',
     ENV_FILE: join(dir, 'env'), BACKUP_DIR: join(dir, 'backups'),

@@ -12,5 +12,6 @@ ENV VITE_API_ORIGIN=$VITE_API_ORIGIN
 RUN npm run build -w @star-oracle/web
 FROM nginxinc/nginx-unprivileged:1.28-alpine
 COPY infra/nginx.conf /etc/nginx/conf.d/default.conf
+COPY infra/nginx-ssh.conf /etc/nginx/ssh.conf
 COPY --from=build /app/apps/web/dist /usr/share/nginx/html
 EXPOSE 8080

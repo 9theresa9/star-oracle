@@ -13,6 +13,8 @@ bash scripts/backup.sh
 
 默认读取仓库根目录 `.env.production`，写入 `backups/`；可通过 `ENV_FILE`、`BACKUP_DIR` 指定绝对路径。不在备份期间运行 DDL/部署迁移；`--single-transaction` 不保证与并发结构变更一致。可每天自动运行。推荐保留 30 天，将已完成备份复制到独立存储，并监控退出码、大小异常和可用空间；保留期按正式隐私政策执行。
 
+SSH-only 的独立 MySQL 参考栈使用 `BACKUP_DEPLOYMENT_MODE=ssh-only ENV_FILE=/安全位置/.env.ssh bash scripts/backup.sh`，固定操作本机 Docker 的 `star-oracle-ssh` 项目及唯一 `compose.ssh.yml`，不会合并公网入口。共享 MySQL 实例必须另行配置只限照见库的导出账号和受审查的导出入口；不能直接套用容器内 root 导出命令，也不能连接简章的库。
+
 必须另外备份 `DATA_ENCRYPTION_KEY` 与 `AUTH_SECRET`，并记录备份时间、部署提交、镜像 digest 和迁移版本。没有正确的原始数据密钥，数据库备份无法恢复问题/日记/AI 正文。密钥与数据库备份分开保护。
 
 ## 恢复：验真、隔离导入、验证、人工切换
@@ -34,6 +36,8 @@ bash scripts/restore.sh /安全位置/具体备份.sql.gz.age
 ```
 
 恢复配置需包含完整生产格式变量和正确的原数据加密密钥；数据库密码可以是本次隔离项目专用的新值。仅用测试数据演练时使用独立测试密钥。不要打印该配置或提交它。
+
+SSH-only 的备份也先恢复到这个无外部入口的候选环境。候选沿用默认 HTTPS 配置验证，可填独立的保留测试域名作为配置占位；不启动 gateway、不申请证书。不要把 `.env.ssh` 直接当成恢复配置，也不要直接用 SSH 启动器接管候选卷。最终转回 SSH-only 需要单独确认卷/网络迁移方案，按账户文档撤销所有恢复会话，再通过 SSH 启动器和入口验收；原库始终保留。
 
 脚本先等待 **age 完整解密且最终认证成功**，随后 `gzip -t` 检查完整性，再完整解压到私有 SQL 文件。这三个步骤全部成功之前，不调用任何 Docker 命令。禁止恢复为 `age | gzip | mysql`：age 可以先输出一部分明文再在最终认证处失败，MySQL 的 DDL 也不会因为管道失败自动回滚。
 

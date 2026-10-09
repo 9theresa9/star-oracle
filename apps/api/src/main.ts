@@ -5,6 +5,8 @@ import express from 'express';
 import helmet from 'helmet';
 import { randomUUID,createHmac } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { existsSync } from 'node:fs';
+import { networkInterfaces } from 'node:os';
 import { toNodeHandler,fromNodeHeaders } from 'better-auth/node';
 import { auth } from './auth.js';
 import { config } from './config.js';
@@ -12,11 +14,16 @@ import { db,redis,consumeLimit,connectRedis } from './infrastructure.js';
 import { AppModule } from './app.module.js';
 import { HttpException } from '@nestjs/common';
 import { SafeErrorFilter,resolveActor } from './security.js';
+import { sshRequestAllowed,assertSshContainerBoundary } from './ssh-transport.js';
 export async function createApp() {
  const server=express();
  server.disable('x-powered-by');
  server.set('trust proxy',config.TRUST_PROXY==='false'?false:config.TRUST_PROXY);
- server.use(helmet({contentSecurityPolicy:false}));
+ if(config.DEPLOYMENT_MODE==='ssh-only')server.use((req,res,next)=>{
+  if(!sshRequestAllowed(req,config.SSH_ONLY_CONTAINER==='true')){res.status(403).json({error:{message:'仅允许已配置的 SSH 本机入口'}});return;}
+  next();
+ });
+ server.use(helmet({contentSecurityPolicy:false,...(config.DEPLOYMENT_MODE==='ssh-only'?{strictTransportSecurity:false}:{})}));
  server.use((req,res,next)=>{
   res.setHeader('Cache-Control','no-store');
   const requestId=randomUUID();Object.assign(req,{requestId});res.setHeader('X-Request-ID',requestId);
@@ -82,13 +89,15 @@ export async function createApp() {
  return app;
 }
 async function bootstrap() {
+ if(config.DEPLOYMENT_MODE==='ssh-only'&&config.SSH_ONLY_CONTAINER==='true')assertSshContainerBoundary(existsSync('/.dockerenv'),networkInterfaces());
  await connectRedis();
  await db.$connect();
  await redis.ping();
  const app=await createApp();
- const server=await app.listen(config.PORT,'0.0.0.0');
+ const server=await app.listen(config.PORT,config.LISTEN_HOST);
  server.requestTimeout=15000;server.headersTimeout=10000;server.maxHeadersCount=64;
- console.log(JSON.stringify({event:'api_ready',port:config.PORT}));
+ console.log(JSON.stringify({event:'api_ready',port:config.PORT,deploymentMode:config.DEPLOYMENT_MODE}));
+ if(config.DEPLOYMENT_MODE==='ssh-only')console.warn(JSON.stringify({event:'ssh_only_transport',notice:'Only the configured loopback SSH entry is supported. Local HTTP does not protect against malicious local processes. Localhost cookies are not isolated by port. Docker isolation must be verified with the dedicated launcher.'}));
  const close=async()=>{await app.close();await db.$disconnect();redis.disconnect();};
  process.once('SIGTERM',()=>{void close();});process.once('SIGINT',()=>{void close();});
 }
