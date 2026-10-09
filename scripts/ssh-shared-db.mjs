@@ -35,7 +35,7 @@ export async function probeSharedClient(context,role='backup',{database='starora
  const imageId=context.manifest.images.find(image=>image.tag==='star-oracle-mysql-client:local')?.id;
  return withRoleEnvironment(context,password,async envFile=>{
   let lines;try{lines=(await context.run(mysqlClientArguments({role,envFile,imageId,sqlMode:'probe',database}))).trim().split(/\r?\n/);}catch{throw new Error('SHARED_DB_PROBE');}
-  let identity;try{identity=JSON.parse(lines.shift());}catch{throw new Error('SHARED_DB_IDENTITY');}
+  const first=lines.shift();let identity;try{identity=JSON.parse(first);}catch{throw new Error(/^0x[0-9a-f]+$/i.test(first??'')?'SHARED_DB_IDENTITY_JSON_HEX':'SHARED_DB_IDENTITY_JSON');}
   validateDatabaseIdentity({role,identity,grants:lines,expectedUuid:context.input.externalMysql.serverUuid,expectedVersion:context.input.externalMysql.serverVersion,database,sourceIp:'172.30.78.7'});
   return identity;
  });

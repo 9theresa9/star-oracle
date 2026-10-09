@@ -78,3 +78,16 @@ test('entrypoint command only accepts reviewed role/action pairs and existing hi
  assert.deepEqual(host.sharedEntrypointCommand('maintenance','account',['create']).slice(-3),['maintenance','account','create']);
  for(const args of [['app','migrate'],['migrator','serve'],['candidateApp','serve'],['maintenance','account',['create','password']],['backup','check']])assert.throws(()=>host.sharedEntrypointCommand(...args),/SHARED_DB_ENTRYPOINT/);
 });
+test('identity diagnostics identify one rejected field without revealing supplied values',()=>{
+ const cases=[['currentUser','private-user@private-host','USER'],['serverUuid','private-server-id','UUID'],['serverVersion','private-version','VERSION'],['database','private-schema','DATABASE'],['currentRole','private-role','ACTIVE_ROLES'],['mandatoryRoles','private-role','MANDATORY_ROLES'],['mandatoryRoles',null,'MANDATORY_ROLES']];
+ for(const [field,value,code] of cases){const f=fixture();f.identity[field]=value;assert.throws(()=>db.validateDatabaseIdentity(f),error=>error.message==='SHARED_DB_IDENTITY_'+code);}
+ for(const identity of [null,undefined,[],42,'private-secret'])assert.throws(()=>db.validateDatabaseIdentity({...fixture(),identity}),error=>error.message==='SHARED_DB_IDENTITY_SHAPE');
+ assert.throws(()=>db.validateDatabaseIdentity({...fixture(),sourceIp:'172.30.78.7'}),error=>error.message==='SHARED_DB_IDENTITY_SOURCE');
+ for(const [field,code] of [['expectedUuid','EXPECTED_UUID'],['expectedVersion','EXPECTED_VERSION']])assert.throws(()=>db.validateDatabaseIdentity({...fixture(),[field]:'private-secret'}),error=>error.message==='SHARED_DB_IDENTITY_'+code);
+});
+test('probe JSON framing failures have a separate static code and never echo client output',async()=>{
+ const {mkdtempSync,rmSync}=await import('node:fs');const {tmpdir}=await import('node:os');const {join}=await import('node:path');
+ const privateDir=mkdtempSync(join(tmpdir(),'shared-json-diagnostic-'));
+ const context={privateDir,settings:{MYSQL_BACKUP_PASSWORD:'1'.repeat(64)},input:{externalMysql:{serverUuid:uuid,serverVersion:'8.4.9'}},manifest:{images:[{tag:'star-oracle-mysql-client:local',id:'sha256:'+'a'.repeat(64)}]},run:()=> 'private-client-banner-or-secret\n{}'};
+ try{await assert.rejects(host.probeSharedClient(context),error=>error.message==='SHARED_DB_IDENTITY_JSON');context.run=()=> '0x7B7D';await assert.rejects(host.probeSharedClient(context),error=>error.message==='SHARED_DB_IDENTITY_JSON_HEX');}finally{rmSync(privateDir,{recursive:true,force:true});}
+});

@@ -27,10 +27,17 @@ export function validateDatabaseIdentity({role, identity, grants, expectedUuid, 
  role: SharedRole; identity: DatabaseIdentity; grants: string[]; expectedUuid: string; expectedVersion: string; database?: string; sourceIp: string;
 }): true {
  const expected = roleIdentity(role, database);
- databasePolicy(/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(expectedUuid) && /^8\.4\.\d+$/.test(expectedVersion), 'SHARED_DB_IDENTITY');
- databasePolicy(sourceIp === expected.sourceIp && identity?.currentUser === expected.user + '@' + expected.sourceIp &&
-  identity.serverUuid === expectedUuid && identity.serverVersion === expectedVersion && identity.database === database &&
-  identity.currentRole === 'NONE' && identity.mandatoryRoles === '', 'SHARED_DB_IDENTITY');
+ // Diagnostics name only fixed invariants, never values returned by MySQL.
+ databasePolicy(/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(expectedUuid), 'SHARED_DB_IDENTITY_EXPECTED_UUID');
+ databasePolicy(/^8\.4\.\d+$/.test(expectedVersion), 'SHARED_DB_IDENTITY_EXPECTED_VERSION');
+ databasePolicy(identity !== null && typeof identity === 'object' && !Array.isArray(identity), 'SHARED_DB_IDENTITY_SHAPE');
+ databasePolicy(sourceIp === expected.sourceIp, 'SHARED_DB_IDENTITY_SOURCE');
+ databasePolicy(identity.currentUser === expected.user + '@' + expected.sourceIp, 'SHARED_DB_IDENTITY_USER');
+ databasePolicy(identity.serverUuid === expectedUuid, 'SHARED_DB_IDENTITY_UUID');
+ databasePolicy(identity.serverVersion === expectedVersion, 'SHARED_DB_IDENTITY_VERSION');
+ databasePolicy(identity.database === database, 'SHARED_DB_IDENTITY_DATABASE');
+ databasePolicy(identity.currentRole === 'NONE', 'SHARED_DB_IDENTITY_ACTIVE_ROLES');
+ databasePolicy(identity.mandatoryRoles === '', 'SHARED_DB_IDENTITY_MANDATORY_ROLES');
  // SHOW GRANTS is deliberately used WITHOUT FOR CURRENT_USER: on MySQL 8.4
  // the latter form omits mandatory roles. Unknown syntax fails closed.
  databasePolicy(Array.isArray(grants) && grants.length === 2, 'SHARED_DB_GRANTS');
