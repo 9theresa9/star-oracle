@@ -1,6 +1,7 @@
 import {test,expect,type Page} from './fixtures';
 import {provisionBrowserAccount} from './fixtures/accounts';
 import {createHmac,randomUUID} from 'node:crypto';
+import {beginRefreshDiagnostics,finishRefreshDiagnostics,refreshAfterSecondFactor} from './fixtures/ssh-refresh-diagnostics';
 
 test.use({serviceWorkers:'block'});
 const origin='http://localhost:17777';
@@ -85,6 +86,8 @@ test.describe('formal SSH production sessions',()=>{
  test.beforeEach(async({baseURL})=>{
   test.skip(baseURL!==origin,'Runs only with the dedicated formal SSH production server');
  });
+ test.beforeEach(async({page})=>{beginRefreshDiagnostics(page);});
+ test.afterEach(async({page,context},info)=>{await finishRefreshDiagnostics(page,context,info);});
 
  test('HTTP login uses host-only HttpOnly Lax cookies, survives refresh, and logs out',async({page,context},info)=>{
   const username=uniqueUsername();
@@ -190,7 +193,7 @@ test.describe('formal SSH production sessions',()=>{
   await code.fill(currentTotp(totpURI));
   await page.getByRole('button',{name:'确认验证码',exact:true}).click();
   await expect(page).toHaveURL(/\/daily$/);
-  await page.reload();
+  await refreshAfterSecondFactor(page);
   expect((await browserIdentity(page)).body.id).toBe(user.id);
   await signOut(page);
 
@@ -199,7 +202,7 @@ test.describe('formal SSH production sessions',()=>{
   await page.getByLabel('一次性恢复码',{exact:true}).fill(backupCodes[0]);
   await page.getByRole('button',{name:'确认验证码',exact:true}).click();
   await expect(page).toHaveURL(/\/daily$/);
-  await page.reload();
+  await refreshAfterSecondFactor(page);
   expect((await browserIdentity(page)).body.id).toBe(user.id);
   await signOut(page);
 
