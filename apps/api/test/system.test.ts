@@ -195,3 +195,13 @@ test('verified email registration and password reset revoke prior sessions',{ski
  const deleted=await send('/api/auth/delete-user',{password:'a-new-verified-password-456'},finalCookie);assert.equal(deleted.status,200);
  assert.equal(await db.user.count({where:{id:user.id}}),0);assert.equal(await db.dailyEntry.count({where:{userId:user.id}}),0);
 });
+
+test('account security mutations reject an old page actor before Better Auth handles them',async()=>{
+ await redis.flushdb();const owner=await register('bound-owner'),other=await register('bound-other');
+ const me=await request('/api/v1/me',{cookie:owner.cookie});const expected=await me.json();
+ for(const path of ['/api/auth/two-factor/enable','/api/auth/two-factor/disable','/api/auth/delete-user']){
+  const response=await fetch(base+path,{method:'POST',headers:{'Content-Type':'application/json',Origin:origin,Cookie:other.cookie,'X-Expected-Actor':owner.id,'X-Expected-Session':expected.sessionBinding},body:JSON.stringify({password:'a-strong-test-password-123',method:'totp'})});
+  assert.equal(response.status,409);assert.equal((await response.json()).code,'SESSION_CHANGED');
+ }
+ const remaining=await db.user.findUniqueOrThrow({where:{id:other.id}});assert.equal(remaining.twoFactorEnabled,false);
+});

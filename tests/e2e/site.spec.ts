@@ -2,7 +2,7 @@ import { test,expect } from './fixtures';
 test('home, guest tarot and six-line ritual fit the viewport',async({page},info)=>{
  await page.goto('/');
  await expect(page.getByRole('heading',{name:/抬头看星.*回身看见自己/})).toBeVisible();
- await expect(page.locator('.hero>.reveal')).toHaveCSS('opacity','1');
+ await expect(page.locator('.luminous-hero-copy')).toHaveCSS('opacity','1');
  if(process.env.CI_VISUAL_REVIEW==='true'&&info.project.name!=='small-chromium')console.log('UI_PREVIEW_'+info.project.name+' '+(await page.screenshot({type:'jpeg',quality:65,animations:'disabled'})).toString('base64'));
  await page.screenshot({animations:'disabled',path:'test-results/home-'+info.project.name+'.png',fullPage:true});
  await page.getByRole('link',{name:'开启一次探索'}).click();
@@ -68,13 +68,13 @@ test.describe('failed lazy route loading',()=>{
   let blocked=false;
   await page.route('**/src/pages/account.tsx*',route=>{blocked=true;return route.abort();});
   await page.goto('/');
-  await expect(page.locator('.hero h1')).toBeVisible();
+  await expect(page.locator('.luminous-hero h1')).toBeVisible();
   if(info.project.name!=='desktop-chromium')await page.getByRole('button',{name:'打开导航'}).click();
   await page.locator('.nav-account').click();
   await expect.poll(()=>blocked,'The actual lazy module request is interrupted').toBe(true);
   await expect(page.getByRole('button',{name:'刷新页面',exact:true})).toBeVisible();
   await expect(page.locator('.site-header')).toBeVisible();
   await page.locator('.site-header .brand').click();
-  await expect(page.locator('.hero h1')).toBeVisible();
+  await expect(page.locator('.luminous-hero h1')).toBeVisible();
  });
 });

@@ -206,3 +206,44 @@ test('follow-up AI remains on the owned cast, is idempotent, encrypted and budge
  assert.equal(await db.aIRequest.count({where:{userId:owner.id,readingId:replacement.id}}),0);
  assert.equal(await db.readingConversation.count({where:{readingId:record.id}}),0,'deleting an owned cast cascades its private conversation');
 });
+
+test('completed follow-up cache restores pending/failed projections without another provider call or credit debit',{skip:!process.env.MOCK_TLS_CERT},async()=>{
+ const owner=await register('follow-up-recovery'),record=await draw(owner.cookie);
+ await db.membership.upsert({where:{userId:owner.id},create:{userId:owner.id,credits:3},update:{credits:3}});
+ await db.userAIUsage.upsert({where:{userId_date:{userId:owner.id,date:chinaDate()}},create:{id:randomUUID(),userId:owner.id,date:chinaDate(),requests:5},update:{requests:5}});
+ const input={prompt:'这次结果里最值得先实践的一步是什么？',consent:true,requestId:randomUUID()};
+ const endpoint='/api/v1/readings/'+record.id+'/conversation',callsBefore=providerCalls;
+ const first=await request(endpoint,{cookie:owner.cookie,method:'POST',body:input});
+ assert.equal(first.status,200);const original=await first.json();
+ const persisted=await db.readingConversation.findUniqueOrThrow({where:{id:original.id}});
+ assert.ok(persisted.inputCipher);assert.ok(!persisted.inputCipher.includes(input.prompt));
+ const snapshot=JSON.parse(open(persisted.inputCipher,'conversation-input:'+owner.id+':'+original.id));
+ assert.equal(snapshot.question,input.prompt);
+ assert.throws(()=>open(persisted.inputCipher!,'conversation-input:'+owner.id+':'+randomUUID()));
+ assert.equal((await db.aIRequest.findUniqueOrThrow({where:{userId_requestId:{userId:owner.id,requestId:input.requestId}}})).status,'done');
+ const globalBudget=(await db.aIUsage.findUniqueOrThrow({where:{date:chinaDate()}})).requests;
+ // This later history must not be included in the earlier request's recovery.
+ const newerId=randomUUID(),newerAnswer={...original.answer,summary:'之后的历史不能替换原请求上下文'};
+ await db.readingConversation.create({data:{id:newerId,userId:owner.id,readingId:record.id,requestId:randomUUID(),status:'done',
+  promptCipher:seal('稍后才提出的问题','conversation-prompt:'+owner.id+':'+newerId),answerCipher:seal(JSON.stringify(newerAnswer),'conversation-answer:'+owner.id+':'+newerId)}});
+ await db.reading.update({where:{id:record.id},data:{interpretation:seal(JSON.stringify(newerAnswer),'interpretation:'+owner.id+':'+record.id),ai:true}});
+ for(const state of ['pending','failed'] as const){
+  // Equivalent durable state to a crash or rollback after AIRequest committed.
+  await db.readingConversation.update({where:{id:original.id},data:{status:state,answerCipher:null,pendingSince:state==='pending'?new Date():null}});
+  await db.auditLog.deleteMany({where:{actorId:owner.id,action:'reading.follow-up',targetId:record.id}});
+  const responses=await Promise.all([1,2].map(()=>request(endpoint,{cookie:owner.cookie,method:'POST',body:input})));
+  for(const response of responses){assert.equal(response.status,200);const restored=await response.json();assert.equal(restored.id,original.id);assert.deepEqual(restored.answer,original.answer);assert.equal(restored.status,'done');}
+  assert.equal(await db.auditLog.count({where:{actorId:owner.id,action:'reading.follow-up',targetId:record.id}}),1,'concurrent projection restores record only one audit event');
+  assert.equal(providerCalls,callsBefore+1);
+  assert.equal((await db.aIUsage.findUniqueOrThrow({where:{date:chinaDate()}})).requests,globalBudget);
+  assert.equal((await db.membership.findUniqueOrThrow({where:{userId:owner.id}})).credits,2);
+  assert.equal((await db.userAIUsage.findUniqueOrThrow({where:{userId_date:{userId:owner.id,date:chinaDate()}}})).requests,6);
+  assert.equal(await db.aIAllowance.count({where:{userId:owner.id,requestId:input.requestId}}),1);
+  assert.equal(await db.creditLedger.count({where:{userId:owner.id,requestId:input.requestId,kind:'ai.consume'}}),1);
+ }
+ await db.readingConversation.update({where:{id:original.id},data:{status:'failed',answerCipher:null}});
+ assert.equal((await request(endpoint,{cookie:owner.cookie,method:'POST',body:{...input,prompt:'不能冒用原请求的新问题'}})).status,409);
+ await db.readingConversation.update({where:{id:original.id},data:{inputCipher:null}});
+ assert.equal((await request(endpoint,{cookie:owner.cookie,method:'POST',body:input})).status,503,'legacy rows without an immutable snapshot fail closed');
+ assert.equal(providerCalls,callsBefore+1);
+});

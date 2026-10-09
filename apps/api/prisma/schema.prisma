@@ -178,6 +178,7 @@ model ReadingConversation {
   readingId String @db.VarChar(36)
   reading Reading @relation(fields:[readingId],references:[id],onDelete:Cascade)
   promptCipher String @db.Text
+  inputCipher String? @db.LongText
   answerCipher String? @db.LongText
   requestId String @db.VarChar(36)
   status String @default("pending") @db.VarChar(16)

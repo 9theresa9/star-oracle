@@ -7,7 +7,7 @@ import { db, redis, seal, open, chinaDate, consumeLimit, acquireAILease } from '
 import { consumeAIAllowance } from './membership.service.js';
 import { RateLimitException } from './exceptions.js';
 
-export type ModelRequest={userId:string;requestId:string;question:string;evidence:Evidence[];context?:string;readingId?:string;reportId?:string};
+export type ModelRequest={userId:string;requestId:string;question:string;evidence:Evidence[];context?:string;readingId?:string;reportId?:string;conversationId?:string};
 // Preserve a stable default for legacy consent-only clients. New clients send a
 // fresh requestId only when the user explicitly starts a new attempt.
 export function initialInterpretationId(readingId:string):string {
@@ -20,27 +20,53 @@ function canonical(value:unknown):unknown {
  return value;
 }
 export function modelFingerprint(input:ModelRequest):string {
- return createHmac('sha256',Buffer.from(config.DATA_ENCRYPTION_KEY,'hex')).update(JSON.stringify(canonical({question:input.question,evidence:input.evidence,context:input.context??'',readingId:input.readingId??null,reportId:input.reportId??null}))).digest('hex');
+ // Only follow-ups add this namespace, preserving existing initial/report
+ // fingerprints while binding a result to its exact conversation, not a cast.
+ return createHmac('sha256',Buffer.from(config.DATA_ENCRYPTION_KEY,'hex')).update(JSON.stringify(canonical({question:input.question,evidence:input.evidence,context:input.context??'',readingId:input.readingId??null,reportId:input.reportId??null,...(input.conversationId?{conversationId:input.conversationId}:{})}))).digest('hex');
+}
+function verifyRequest(row:{readingId:string|null;reportId:string|null;fingerprint:string},input:ModelRequest) {
+ if(row.readingId!==(input.readingId??null)||row.reportId!==(input.reportId??null))throw new ConflictException('请求标识已用于其他来源');
+ if(row.fingerprint!==modelFingerprint(input))throw new ConflictException('请求标识已用于其他内容');
 }
 function decodeResult(row:{userId:string;requestId:string;resultCipher:string|null}):Interpretation {
  if(!row.resultCipher)throw new ServiceUnavailableException('AI 结果暂时不可用');
  return JSON.parse(open(row.resultCipher,'ai-request:'+row.userId+':'+row.requestId)) as Interpretation;
 }
+// Recovery never calls the provider or reserves allowance. It may only fence
+// an expired pending attempt with a CAS, just like the initial request path.
+export async function modelRequestState(input:ModelRequest):Promise<{status:string;result:Interpretation|null}> {
+ const where={userId_requestId:{userId:input.userId,requestId:input.requestId}};
+ let row=await db.aIRequest.findUnique({where});
+ if(!row)return {status:'missing',result:null};
+ verifyRequest(row,input);
+ if(row.status==='pending'&&row.pendingSince&&row.pendingSince.getTime()<Date.now()-120000){
+  const expired=await db.aIRequest.updateMany({where:{id:row.id,status:'pending',pendingSince:row.pendingSince},data:{status:'failed',pendingSince:null}});
+  if(expired.count===1)return {status:'failed',result:null};
+  // The provider may have committed done while this caller tried to expire it.
+  row=await db.aIRequest.findUnique({where});
+  if(!row)return {status:'missing',result:null};
+  verifyRequest(row,input);
+ }
+ return {status:row.status,result:row.status==='done'?decodeResult(row):null};
+}
+export function failedModelAttempt(message:string) {
+ return new ServiceUnavailableException({message,code:'AI_ATTEMPT_FAILED'});
+}
 export async function requestModel(input:ModelRequest):Promise<Interpretation> {
- if(input.readingId&&input.reportId)throw new ConflictException('AI 请求来源无效');
+ if((input.readingId&&input.reportId)||(input.conversationId&&!input.readingId))throw new ConflictException('AI 请求来源无效');
  if(input.question.length>2000||(input.context?.length??0)>16000||!input.evidence.length||input.evidence.length>32||new Set(input.evidence.map(x=>x.reference)).size!==input.evidence.length)throw new ConflictException('AI 请求内容无效');
  const fingerprint=modelFingerprint(input);
  const where={userId_requestId:{userId:input.userId,requestId:input.requestId}};
  const previous=await db.aIRequest.findUnique({where});
  if(previous){
-  if(previous.readingId!==(input.readingId??null)||previous.reportId!==(input.reportId??null))throw new ConflictException('请求标识已用于其他来源');
-  if(previous.fingerprint!==fingerprint)throw new ConflictException('请求标识已用于其他内容');
+  verifyRequest(previous,input);
   if(previous.status==='done')return decodeResult(previous);
-  if(previous.status==='failed')throw new ServiceUnavailableException('本次尝试未完成，请选择重新尝试');
+  if(previous.status==='failed')throw failedModelAttempt('本次尝试未完成，请选择重新尝试');
   // Never repeat a request that might have already reached the provider. A fresh
   // requestId is required after an interrupted attempt.
   if(previous.pendingSince&&previous.pendingSince.getTime()<Date.now()-120000){
-   await db.aIRequest.updateMany({where:{id:previous.id,status:'pending',pendingSince:previous.pendingSince},data:{status:'failed',pendingSince:null}});
+   const expired=await db.aIRequest.updateMany({where:{id:previous.id,status:'pending',pendingSince:previous.pendingSince},data:{status:'failed',pendingSince:null}});
+   if(expired.count===1)throw failedModelAttempt('上次尝试已中断，请选择重新尝试');
    throw new ServiceUnavailableException('上次尝试已中断，请选择重新尝试');
   }
   throw new ConflictException('这次解读正在生成，请稍后刷新');
@@ -62,6 +88,9 @@ export async function requestModel(input:ModelRequest):Promise<Interpretation> {
      if(!owner||owner.disabled)throw new UnauthorizedException('账户不可用');
      if(input.readingId&&!await tx.reading.findFirst({where:{id:input.readingId,userId:input.userId},select:{id:true}}))throw new NotFoundException('记录不存在');
      if(input.reportId&&!await tx.reviewReport.findFirst({where:{id:input.reportId,userId:input.userId},select:{id:true}}))throw new NotFoundException('回顾不存在');
+     // A failed conversation with no model row is terminal only because this
+     // serializable check prevents a delayed original call from claiming it.
+     if(input.conversationId&&!await tx.readingConversation.findFirst({where:{id:input.conversationId,userId:input.userId,readingId:input.readingId,requestId:input.requestId,status:'pending'},select:{id:true}}))throw new ConflictException('追问状态已改变，请刷新');
      const existing=await tx.aIRequest.findUnique({where});
      if(existing)throw new ConflictException('这次解读已开始，请稍后刷新');
      // Content caches cascade when their source is deleted. The durable,
@@ -105,7 +134,12 @@ export async function requestModel(input:ModelRequest):Promise<Interpretation> {
   if(saved.count!==1)throw new ConflictException('解读状态已改变，请刷新');
   return result;
  }catch(error){
-  if(claimed)await db.aIRequest.updateMany({where:{id:requestRowId,status:'pending',pendingSince:started},data:{status:'failed',pendingSince:null}}).catch(()=>{});
+  if(claimed){
+   const failed=await db.aIRequest.updateMany({where:{id:requestRowId,status:'pending',pendingSince:started},data:{status:'failed',pendingSince:null}}).catch(()=>null);
+   // Only a confirmed durable terminal transition unlocks a new paid attempt.
+   // A failed lookup/write or an already-completed result keeps the nonce.
+   if(failed?.count===1)throw failedModelAttempt('本次 AI 尝试未完成，请选择重新尝试');
+  }
   if(error instanceof HttpException)throw error;
   throw new ServiceUnavailableException('AI 暂时不可用，已保留基础解读');
  }finally{await redis.zrem('ai:leases',lease).catch(()=>{});}

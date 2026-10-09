@@ -10,7 +10,8 @@ import { auth } from './auth.js';
 import { config } from './config.js';
 import { db,redis,consumeLimit,connectRedis } from './infrastructure.js';
 import { AppModule } from './app.module.js';
-import { SafeErrorFilter } from './security.js';
+import { HttpException } from '@nestjs/common';
+import { SafeErrorFilter,resolveActor } from './security.js';
 export async function createApp() {
  const server=express();
  server.disable('x-powered-by');
@@ -25,7 +26,8 @@ export async function createApp() {
   if(origin===config.WEB_ORIGIN) {
    res.setHeader('Access-Control-Allow-Origin',origin);res.setHeader('Vary','Origin');
    res.setHeader('Access-Control-Allow-Credentials','true');
-   res.setHeader('Access-Control-Allow-Headers','Content-Type');
+   res.setHeader('Access-Control-Allow-Headers','Content-Type, X-Expected-Actor, X-Expected-Session');
+   res.setHeader('Access-Control-Expose-Headers','X-Actor-Id, X-Session-Binding, X-Request-ID');
    res.setHeader('Access-Control-Allow-Methods','GET,POST,PATCH,DELETE,OPTIONS');
   }
   if(req.method==='OPTIONS'){res.sendStatus(204);return;}
@@ -43,7 +45,14 @@ export async function createApp() {
   }catch{res.status(503).json({error:{message:'安全服务暂时不可用'}});}
  });
  const authHandler=toNodeHandler(auth);
- server.all('/api/auth/*splat',(req,res,next)=>{
+ server.all('/api/auth/*splat',async(req,res,next)=>{
+  if(req.headers['x-expected-actor']||req.headers['x-expected-session']){
+   try{await resolveActor(req);}catch(error){
+    const status=error instanceof HttpException?error.getStatus():503;
+    const detail=error instanceof HttpException?error.getResponse():null;
+    res.status(status).json({message:error instanceof HttpException?error.message:'账户确认暂时不可用',code:detail&&typeof detail==='object'&&'code' in detail&&detail.code==='SESSION_CHANGED'?'SESSION_CHANGED':undefined});return;
+   }
+  }
   let bytes=0;
   req.on('data',(chunk:Buffer)=>{bytes+=chunk.length;if(bytes>32768)req.destroy();});
   Promise.resolve(authHandler(req,res)).catch(next);
