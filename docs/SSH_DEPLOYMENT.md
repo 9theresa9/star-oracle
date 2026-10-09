@@ -4,7 +4,7 @@
 
 ## 支持边界
 
-- 服务器使用本机 Linux、rootful Docker Engine **28.0.0 或更新稳定版**、Compose v2（支持 `create --pull never` 和 `start --wait`，建议 2.34+）、Node.js 24。启动器只连接 `/var/run/docker.sock`，不支持远端 Docker context、rootless、Docker Desktop 或未知版本后缀。不会自动升级系统。
+- 服务器使用本机 Linux、rootful Docker Engine **28.0.0 或更新稳定版**、Compose v2（支持 `create --pull never`，当前 CI runner 预装 2.38.2）、Node.js 24。启动器只连接 `/var/run/docker.sock`，不支持远端 Docker context、rootless、Docker Desktop 或未知版本后缀。不会自动升级系统。
 - Docker 28 之前的同一二层网络回环发布漏洞不在支持范围。启动器还检查实际 dockerd 参数及配置，拒绝 `allow-direct-routing`、关闭 Docker 防火墙、IPv6/路由型网络与额外受信网卡设置。不要用防火墙转发、反向代理、FRP、Tailscale Serve 等再公开此端口。
 - 此参考栈含独立 MySQL 与 Redis。容器上限为 MySQL 768 MiB、API/一次性迁移各 512 MiB、Redis 192 MiB、Web 128 MiB，单容器 1 CPU/256 PID；Redis `maxmemory 128mb`，达到容量时拒绝写入而不驱逐认证状态。需给操作系统、Docker 和磁盘缓存留余量；建议至少 3 GiB 可用内存，1 GiB 主机不适合此完整参考栈。已有其他应用时先核算资源，限制不是容量保证。
 - 共享 MySQL 实例是后续单独受审查的拓扑变更。这里固定使用照见独立库 `star_oracle`、仅 DML 的 `oracle` 应用账户、只限本库的 `oracle_migrator`，以及专用 Redis；不会连接或修改其他应用数据库。参考栈密码为独立 64 位十六进制值，已有共享库的凭据不能直接塞入此配置。
@@ -65,7 +65,7 @@ node scripts/ssh-deploy.mjs check --env-file /安全目录/.env.ssh
 node scripts/ssh-deploy.mjs start --env-file /安全目录/.env.ssh
 ```
 
-启动顺序为：校验发布包与完整渲染配置 → `create --no-build --pull never` 创建停止状态的容器 → inspect 实际 HostConfig、挂载、资源限制、网络和 IPAM → 启动并等待健康/迁移完成 → 再 inspect 实际分配地址、健康状态和发布端口。检查失败会停止此固定 SSH 项目拥有的容器，不会停止其他项目、清空 Redis、删除数据卷或运行 prune。
+启动顺序为：校验发布包与完整渲染配置 → `create --no-build --pull never` 创建停止状态的容器 → inspect 实际 HostConfig、挂载、资源限制、网络和 IPAM → 对已检查的容器执行 `start`，随后最多 240 秒轮询实际健康/迁移状态 → 再 inspect 实际分配地址、健康状态和发布端口。检查失败会停止此固定 SSH 项目拥有的容器，不会停止其他项目、清空 Redis、删除数据卷或运行 prune。
 
 网络检查拒绝无关容器端点。不要手工把其他容器接入这两张网。所有服务 `restart: 'no'`，重启服务器后由获授权维护人员再次运行检查启动器；Docker 自动重启不能绕过检查。启动后检查是启动/显式 check 时的快照，不是后台安全监控。人工改动 Docker、网络或镜像后必须重新 check；拥有 root/Docker 权限的人也能绕过应用隔离。
 
@@ -122,4 +122,4 @@ CI 浏览器回归以生产 API 配置验证 Chromium、WebKit、窄屏中的 HT
 
 本地单元测试覆盖恶意配置和启动时序，不能代替 Docker/浏览器运行证据。发布必须对应上述成功 CI 运行；工作流配置存在或打包脚本通过语法检查不代表上线验收完成。
 
-参考：[Docker 端口发布与 28.0.0 之前的回环限制](https://docs.docker.com/engine/network/port-publishing/)、[Compose start --wait](https://docs.docker.com/reference/cli/docker/compose/start/)。
+参考：[Docker 端口发布与 28.0.0 之前的回环限制](https://docs.docker.com/engine/network/port-publishing/)、[Compose 2.38.2 start 实现](https://github.com/docker/compose/blob/v2.38.2/cmd/compose/start.go)。

@@ -187,3 +187,24 @@ test('SSH preserves a legacy UTF-8 auth secret through canonical base64 without 
   writeFileSync(path,valid+'\nAUTH_SECRET_BASE64='+Buffer.from(legacy).toString('base64')+'\nAUTH_SECRET='+ '9'.repeat(64));
   assert.throws(()=>loadSettings(path),/SSH settings/);
 });
+
+test('SSH start works with Compose 2.38 without start wait flags and waits for health',async()=>{
+  const {runDeployment}=await implementation();
+  let started=false;
+  const calls=[];
+  const run=args=>{calls.push(args);if(args.includes('version'))return '28.0.4';if(args.includes('config'))return JSON.stringify(configuration());if(args.includes('ps'))return containers().map(c=>c.Id).join('\n');if(args.includes('network'))return JSON.stringify([network(args.at(-1)==='star-oracle-ssh-backend'?'backend':'ssh')]);if(args.includes('inspect')){const c=containers();if(started)for(const container of c)container.State=container.Id==='id-migrate'?{Running:false,Status:'exited',ExitCode:0}:{Running:true,Status:'running',Health:{Status:'healthy'}};return JSON.stringify(c);}if(args.includes('start')){if(args.includes('--wait')||args.includes('--wait-timeout'))throw new Error('unknown flag: --wait (Compose 2.38 CLI)');started=true;}return '';};
+  assert.doesNotThrow(()=>runDeployment({action:'start',root,settings:{},run}));
+  const start=calls.findIndex(args=>args.includes('start'));
+  assert.ok(calls.slice(start+1).some(args=>args.includes('inspect')),'healthy inspection is required after the plain start command');
+});
+
+test('SSH health wait allows starting state and rejects unhealthy or timed-out dependencies',async()=>{
+  const {waitForReady}=await implementation();
+  assert.equal(typeof waitForReady,'function','bounded inspected health wait must exist');
+  for(const outcome of ['healthy','unhealthy','timeout']){
+    let clock=0,polls=0;
+    const run=args=>{if(args.includes('ps'))return containers().map(c=>c.Id).join('\n');if(args.includes('network'))return JSON.stringify([network(args.at(-1)==='star-oracle-ssh-backend'?'backend':'ssh')]);const c=containers();polls++;for(const container of c)if(['mysql','redis'].includes(container.Config.Labels['com.docker.compose.service']))container.State={Running:true,Status:'running',Health:{Status:polls>1&&outcome!=='timeout'?outcome:'starting'}};return JSON.stringify(c);};
+    const wait=()=>waitForReady({run,config:configuration(),serviceNames:['mysql','redis'],timeoutMs:20,now:()=>clock,pause:()=>{clock+=10;}});
+    if(outcome==='healthy'){assert.equal(wait().length,5);assert.ok(polls>=2);}else assert.throws(wait,/SSH policy:.*(?:unhealthy|timed out)/);
+  }
+});

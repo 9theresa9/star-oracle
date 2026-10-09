@@ -195,13 +195,40 @@ export function commandRunner(settings={}) {
     const result=spawnSync('docker',args,{env:{...dockerEnvironment(),...settings},encoding:'utf8',maxBuffer:32*1024**2,timeout:360000});
     // Compose and Docker errors can contain interpolated secrets. Never echo
     // their raw output; operators can inspect sanitized application diagnostics.
-    if(result.status!==0)throw new Error(`Docker ${args.includes('compose')?'Compose':'operation'} failed (${result.error?.code??result.status??'unknown'}); raw output withheld to protect credentials.`);
+    if(result.status!==0){
+      const verb=args.find(arg=>['config','create','start','stop','inspect','version','ps','exec','run','logs','save','load','info','ls'].includes(arg))??'operation';
+      throw new Error(`Docker ${args.includes('compose')?'Compose ':''}${verb} failed (${result.error?.code??result.status??'unknown'}); raw output withheld to protect credentials.`);
+    }
     return result.stdout.trim();
   };
 }
 const baseDocker=['--host','unix:///var/run/docker.sock'];
 function ownedContainers(run){const ids=run([...baseDocker,'ps','-aq','--filter',`label=com.docker.compose.project=${PROJECT}`]).split(/\s+/).filter(Boolean);return ids.length?JSON.parse(run([...baseDocker,'inspect',...ids])):[];}
 function stopOwned(run,containers){const ids=containers.filter(c=>c.Config?.Labels?.['com.docker.compose.project']===PROJECT&&c.Config?.Labels?.['io.star-oracle.deployment']==='ssh-only').map(c=>c.Id);if(ids.length)run([...baseDocker,'stop','--time','20',...ids]);}
+function safeContainerState(container){
+  const service=container.Config.Labels['com.docker.compose.service'];
+  const status=['created','running','paused','restarting','removing','exited','dead'].includes(container.State?.Status)?container.State.Status:'unknown';
+  const health=['starting','healthy','unhealthy'].includes(container.State?.Health?.Status)?container.State.Health.Status:'none';
+  const code=Number.isInteger(container.State?.ExitCode)?container.State.ExitCode:'unknown';
+  return `${service}: status=${status}, health=${health}, exit=${code}`;
+}
+export function waitForReady({run,config,manifest=null,serviceNames=Object.keys(services),timeoutMs=240000,now=Date.now,pause=ms=>Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,ms)}){
+  const deadline=now()+timeoutMs;
+  while(true){
+    const current=ownedContainers(run);
+    validateContainers(current,config,manifest);
+    for(const network of [NETWORK,BACKEND])validateNetwork(JSON.parse(run([...baseDocker,'network','inspect',network]))[0],current);
+    const selected=current.filter(c=>serviceNames.includes(c.Config.Labels['com.docker.compose.service']));
+    for(const container of selected){
+      const name=container.Config.Labels['com.docker.compose.service'],state=container.State;
+      policy(!state?.OOMKilled&&state?.Health?.Status!=='unhealthy'&&!['dead','removing','restarting'].includes(state?.Status)&&!(state?.Status==='exited'&&(name!=='migrate'||state.ExitCode!==0)),`unhealthy startup (${safeContainerState(container)})`);
+    }
+    const ready=selected.every(c=>c.Config.Labels['com.docker.compose.service']==='migrate'?c.State?.Status==='exited'&&c.State.ExitCode===0:c.State?.Running===true&&c.State.Health?.Status==='healthy');
+    if(ready)return current;
+    policy(now()<deadline,`startup timed out (${selected.map(safeContainerState).join('; ')})`);
+    pause(Math.min(1000,Math.max(1,deadline-now())));
+  }
+}
 export function runDeployment({action,root,settings,run=commandRunner(settings),manifest=null}) {
   policy(['check','start','stop','maintenance'].includes(action),'unsupported launcher action');
   if(action==='stop'){stopOwned(run,ownedContainers(run));return;}
@@ -220,8 +247,8 @@ export function runDeployment({action,root,settings,run=commandRunner(settings),
       validateContainers(current,config,manifest);
       for(const network of [NETWORK,BACKEND])validateNetwork(JSON.parse(run([...baseDocker,'network','inspect',network]))[0],current);
       if(action==='maintenance'){
-        run([...compose,'start','--wait','--wait-timeout','240','mysql','redis']);
-        current=ownedContainers(run);
+        run([...compose,'start','mysql','redis']);
+        current=waitForReady({run,config,manifest,serviceNames:['mysql','redis']});
         const migration=current.find(c=>c.Config.Labels['com.docker.compose.service']==='migrate');
         run([...baseDocker,'start','--attach',migration.Id]);
         current=ownedContainers(run);validateContainers(current,config,manifest);
@@ -231,8 +258,10 @@ export function runDeployment({action,root,settings,run=commandRunner(settings),
         for(const c of current){const service=c.Config.Labels['com.docker.compose.service'];policy(['mysql','redis'].includes(service)?c.State?.Running&&c.State.Health?.Status==='healthy':!c.State?.Running,'maintenance requires healthy private dependencies and every API/web/migration stopped');}
         return {config,containers:current};
       }
-      run([...compose,'start','--wait','--wait-timeout','240']);
-      current=ownedContainers(run);
+      // Compose 2.38 has no `start --wait` CLI flags. Start only the already
+      // inspected containers, then perform our own bounded health inspection.
+      run([...compose,'start']);
+      current=waitForReady({run,config,manifest});
       validateContainers(current,config,manifest,true);
       for(const network of [NETWORK,BACKEND])validateNetwork(JSON.parse(run([...baseDocker,'network','inspect',network]))[0],current);
     }
