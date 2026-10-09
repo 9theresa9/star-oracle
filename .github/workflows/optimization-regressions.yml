@@ -31,13 +31,14 @@ jobs:
             test-results/optimization/
             playwright-report/optimization/
           retention-days: 7
+          if-no-files-found: error
   webkit-refresh-evidence:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        mode: [fast, ready]
+        sequence: [isolated, full-suite]
     services:
       mysql:
         image: mysql:8.4
@@ -58,7 +59,7 @@ jobs:
       AUTH_SECRET: synthetic-ssh-refresh-auth-secret-12345678901234567890
       DATA_ENCRYPTION_KEY: 1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef
       ORACLE_SSH_REFRESH_DIAGNOSTICS: '1'
-      ORACLE_SSH_REFRESH_MODE: ${{ matrix.mode }}
+      ORACLE_SSH_REFRESH_MODE: fast
       DEBUG: pw:browser
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -82,16 +83,21 @@ jobs:
             sleep 1
           done
           exit 1
-      - name: Compare the fixed WebKit refresh sequence without retries
-        run: npx playwright test -c tests/e2e/playwright.ssh.config.ts --project=ssh-iphone-webkit --grep 'TOTP and single-use recovery codes' --repeat-each=6 --retries=0
+      - name: Observe a fresh WebKit browser without retries
+        if: matrix.sequence == 'isolated'
+        run: npx playwright test -c tests/e2e/playwright.ssh.config.ts --project=ssh-iphone-webkit --grep 'TOTP and single-use recovery codes' --retries=0
+      - name: Observe the original context sequence in one WebKit browser
+        if: matrix.sequence == 'full-suite'
+        run: npx playwright test -c tests/e2e/playwright.ssh.config.ts --project=ssh-iphone-webkit --retries=0
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: ssh-refresh-${{ matrix.mode }}-evidence
+          name: ssh-refresh-${{ matrix.sequence }}-evidence
           path: |
             test-results/ssh-only/
             playwright-report/ssh-only/
           retention-days: 7
+          if-no-files-found: error
       - name: Stop the isolated Redis fixture
         if: always()
         run: docker rm -f synthetic-ssh-refresh-redis >/dev/null 2>&1 || true

@@ -12,5 +12,5 @@ export default defineConfig({
   {name:'optimization-small-chromium',use:{...devices['Desktop Chrome'],viewport:{width:320,height:780}}},
  ],
  webServer:{cwd:process.cwd(),command:'npm run dev:web',url:'http://localhost:5173',reuseExistingServer:false},
- reporter:[['list'],['html',{outputFolder:'playwright-report/optimization',open:'never'}]],
+ reporter:[['list'],['html',{outputFolder:'../../playwright-report/optimization',open:'never'}]],
 });

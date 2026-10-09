@@ -58,6 +58,7 @@ const faults:{name:string;respond:(route:Route)=>Promise<void>}[]=[
  {name:'a truncated 200 response',respond:route=>route.fulfill({status:200,headers:{...headers,'Content-Type':'application/json'},body:'{"id":'})},
  {name:'a pending report response',respond:route=>route.fulfill({headers,json:makeReport(route.request().postDataJSON() as Attempt,'pending')})},
  {name:'a failed report projection response',respond:route=>route.fulfill({headers,json:makeReport(route.request().postDataJSON() as Attempt,'failed')})},
+ {name:'a done report response without its result',respond:route=>route.fulfill({headers,json:{...makeReport(route.request().postDataJSON() as Attempt),result:undefined}})},
  {name:'a pending 409 response',respond:route=>route.fulfill({status:409,headers,json:{error:{message:'回顾正在生成，请稍后刷新'}}})},
  {name:'a generic 503 response',respond:route=>route.fulfill({status:503,headers,json:{error:{message:'暂时无法完成，请稍后再试'}}})},
  // A failed cache/state lookup may use terminal-sounding prose without durable terminal evidence.
@@ -65,7 +66,7 @@ const faults:{name:string;respond:(route:Route)=>Promise<void>}[]=[
 ];
 
 for(const fault of faults){
- test(`review keeps one immutable attempt after ${fault.name}`,async({page})=>{
+ test(`review keeps one immutable attempt after ${fault.name}`,async({page},info)=>{
   let release!:()=>void;
   const barrier=new Promise<void>(resolve=>{release=resolve;});
   const fixture=await setup(page,async(route,attempt,index)=>{
@@ -85,6 +86,11 @@ for(const fault of faults){
   await expect(page.getByRole('button',{name:'开始新的回顾',exact:true})).toHaveCount(0);
   await expect(page.getByRole('button',{name:'重试上次回顾',exact:true})).toBeEnabled();
   expect(fixture.attempts[0]).toEqual({period:'month',date:'2026-10-01',includeJournal:true,consent:true,requestId:expect.stringMatching(uuid)});
+  if(fault.name==='a lost response'){
+   const path=info.outputPath('review-lost-response-preserved.png');
+   await page.screenshot({path,fullPage:true,animations:'disabled'});
+   await info.attach('review-lost-response-preserved',{path,contentType:'image/png'});
+  }
 
   await page.getByRole('button',{name:'重试上次回顾',exact:true}).click();
   await expect(page.getByRole('status').filter({hasText:'回顾已保存到你的私人账户。'})).toBeVisible();
@@ -95,6 +101,12 @@ for(const fault of faults){
   await expect(page.getByRole('checkbox',{name:journalLabel,exact:true})).toBeEnabled();
   await expect(page.getByRole('checkbox',{name:consentLabel,exact:true})).not.toBeChecked();
   await expect(page.getByRole('button',{name:'生成仅属于你的月回顾',exact:true})).toBeDisabled();
+  if(fault.name==='a lost response'){
+   await expect(page.locator('.insight-report')).toContainText('这是本次请求保存的回顾。');
+   const path=info.outputPath('review-lost-response-recovered.png');
+   await page.screenshot({path,fullPage:true,animations:'disabled'});
+   await info.attach('review-lost-response-recovered',{path,contentType:'image/png'});
+  }
  });
 }
 
@@ -115,6 +127,7 @@ test('failed archive projection and changed source data do not authorize a fresh
  await expect(archived).toHaveCount(1);
  await expect(archived).toContainText('这份回顾暂时没有可显示的内容');
  await expect(archived).not.toContainText('重新发起');
+ await expect(archived.getByRole('button',{name:'删除这份回顾',exact:true})).toBeDisabled();
  await expect(page.getByRole('button',{name:'开始新的回顾',exact:true})).toHaveCount(0);
 
  // Another device changes the source data. A reconnect refetches the real page's queries.
@@ -126,6 +139,8 @@ test('failed archive projection and changed source data do not authorize a fresh
  await expect(page.getByRole('status').filter({hasText:'回顾已保存到你的私人账户。'})).toBeVisible();
  expect(fixture.attempts).toHaveLength(2);
  expect(fixture.attempts[1]).toEqual(fixture.attempts[0]);
+ await expect(archived).toContainText('这是本次请求保存的回顾。');
+ await expect(archived.getByRole('button',{name:'删除这份回顾',exact:true})).toBeEnabled();
 });
 
 test('only a terminal attempt code permits an explicit new UUID with renewed consent',async({page})=>{

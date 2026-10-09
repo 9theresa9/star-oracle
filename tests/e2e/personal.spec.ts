@@ -283,7 +283,7 @@ test('saved explorations, private calendar, actions, reviews and export survive 
   const loadedReports=page.waitForResponse(response=>new URL(response.url()).pathname==='/api/v1/insights/reports'&&response.request().method()==='GET');
   await page.getByRole('button',{name:'刷新',exact:true}).click();
   expect((await loadedReports).status()).toBe(200);
-  const failedReport=page.locator('.insight-report').filter({has:page.getByText('这次生成未完成。报告没有可用的 AI 内容，请稍后重新发起。',{exact:true})});
+  const failedReport=page.locator('.insight-report').filter({has:page.getByText('这份回顾暂时没有可显示的内容。可以刷新列表查看最新状态。',{exact:true})});
   await expect(failedReport).toHaveCount(1);
   await expect(failedReport.getByRole('button',{name:'删除这份回顾',exact:true})).toBeVisible();
   const deletingReport=write(page,'/api/v1/insights/reports/'+failedReportId,'DELETE');

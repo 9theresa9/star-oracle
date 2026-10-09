@@ -11,7 +11,7 @@ export function CopyButton({text}:{text:string}){
  const [done,setDone]=useState(false),[error,setError]=useState(false);
  const timer=useRef<ReturnType<typeof setTimeout>|null>(null),mounted=useRef(false);
  useEffect(()=>{mounted.current=true;return ()=>{mounted.current=false;if(timer.current!==null)clearTimeout(timer.current);};},[]);
- return <><button className="icon-button" aria-label="复制解读" onClick={async()=>{try{await navigator.clipboard.writeText(text);if(!mounted.current)return;if(timer.current!==null)clearTimeout(timer.current);setDone(true);setError(false);timer.current=setTimeout(()=>{timer.current=null;setDone(false);},1800);}catch{if(mounted.current)setError(true);}}}>{done?<Check size={18}/>:<Copy size={18}/>}</button>{error?<textarea aria-label="手动复制解读" readOnly value={text}/>:null}</>;
+ return <><button type="button" className="icon-button" aria-label="复制解读" onClick={async()=>{try{await navigator.clipboard.writeText(text);if(!mounted.current)return;if(timer.current!==null)clearTimeout(timer.current);setDone(true);setError(false);timer.current=setTimeout(()=>{timer.current=null;setDone(false);},1800);}catch{if(mounted.current)setError(true);}}}>{done?<Check size={18}/>:<Copy size={18}/>}</button>{error?<textarea aria-label="手动复制解读" readOnly value={text}/>:null}</>;
 }
 export function Reveal({children,className=''}:{children:ReactNode;className?:string}){
  return <div className={'reveal visible '+className}>{children}</div>;

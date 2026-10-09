@@ -35,5 +35,5 @@ export async function finishRefreshDiagnostics(page:Page,context:BrowserContext,
  const state=active.get(page);if(!state)return;
  try{await snapshot(page,context,'test-finished');}catch{state.events.push({at:0,kind:'cookie-metadata-unavailable'});}
  state.dispose();active.delete(page);
- await info.attach('ssh-refresh-diagnostics',{body:Buffer.from(JSON.stringify({mode:process.env.ORACLE_SSH_REFRESH_MODE??'fast',status:info.status,events:state.events,cookies:state.cookies},null,2)),contentType:'application/json'});
+ await info.attach('ssh-refresh-diagnostics',{body:Buffer.from(JSON.stringify({mode:process.env.ORACLE_SSH_REFRESH_MODE??'fast',workerIndex:info.workerIndex,repeatEachIndex:info.repeatEachIndex,status:info.status,events:state.events,cookies:state.cookies},null,2)),contentType:'application/json'});
 }

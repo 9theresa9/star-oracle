@@ -22,5 +22,5 @@ export default defineConfig({
   {cwd:process.cwd(),command:'npm run dev -w @star-oracle/web -- --port 17777 --strictPort',url:origin,reuseExistingServer:false,
    env:{API_DEV_TARGET:'http://127.0.0.1:3112',VITE_API_ORIGIN:origin}},
  ],
- reporter:[['list'],['html',{outputFolder:'playwright-report/ssh-only',open:'never'}]],
+ reporter:[['list'],['html',{outputFolder:'../../playwright-report/ssh-only',open:'never'}]],
 });
