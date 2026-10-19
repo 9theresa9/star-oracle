@@ -1,0 +1,8 @@
+# Vue library migration increment
+
+Inline execution under the already approved architecture, original UI/function preservation and user's continuing end-to-end authorization. This is the existing public library flow, not a new product design. Preserve `apps/web/src/pages/library.tsx`, `components/reading.tsx` art and `oracle-modal.tsx` behavior:78tarot/64hexagrams, every canonical description/meaning/practice, category/search fields, tab URL/back navigation, six-line order, geometric art, native modal Escape/backdrop/focus restoration. No API persistence is invented for this original static feature.
+
+1. Add failing pure filter/query and actual Vue SSR tests against the canonical domain exports. Keep installed public Vue toolchain, styles and old React deployment entry.
+2. Port deterministic SVG/hexagram and native dialog into small reusable Vue components. Port the full library page using canonical data and reactive orchestration; provide isolated `/vue/library` and `/vue/tutorials` review entries. Preserve other query values, push browser history, clear only search on explicit tab switching and retain suit selection.
+3. Run unit/SSR, type/build and actual isolated Edge via the original127.0.0.1:5177 gate. Check all142detail records, filtering, tab/back/query semantics, focus return, Escape/backdrop closure, six-line layout and375px mobile overflow, with zero backend/external requests. No mock screenshot is counted as Java integration.
+4. Independent review, fixes, API/status docs and frontend commit/bundle. Java-backed and authenticated pages remain explicitly pending until genuine integration passes. No production/default entry switch, main merge, paid AI or repeated remote write attempt.
