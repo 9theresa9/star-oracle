@@ -23,8 +23,9 @@ try{
  browser=await chromium.launch({headless:true,...(executablePath?{executablePath}:{})});
  const context=await browser.newContext();
  await context.route('**/*',route=>new URL(route.request().url()).origin===new URL(url).origin?route.continue():route.abort());
- const page=await context.newPage(),errors=[],apiRequests=[];
+ const page=await context.newPage(),errors=[],consoleErrors=[],apiRequests=[];
  page.on('pageerror',error=>errors.push(error.message));
+ page.on('console',message=>{if(message.type()==='error')consoleErrors.push(message.text());});
  page.on('request',request=>{if(new URL(request.url()).pathname.startsWith('/api/'))apiRequests.push(request.url());});
  await page.goto(url,{waitUntil:'networkidle'});
  assert.equal(await page.locator('.tutorial-card').count(),10);assert.equal(await page.getByRole('checkbox').count(),40);
@@ -39,6 +40,6 @@ try{
  await page.setViewportSize({width:375,height:812});
  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),'Mobile page must not overflow horizontally');
  if(process.env.ORACLE_TEST_SCREENSHOT)await page.screenshot({path:process.env.ORACLE_TEST_SCREENSHOT,fullPage:true});
- assert.deepEqual(errors,[]);assert.deepEqual(apiRequests,[]);
- console.log(JSON.stringify({browser:'actual isolated headless browser',courses:10,steps:40,toggleAndReload:true,categoryFilter:true,completionBadge:true,mobileWidth:375,consoleErrors:errors.length,apiRequests:apiRequests.length,backendIntegration:'not exercised; original tutorials persist locally'},null,2));
+ assert.deepEqual(errors,[]);assert.deepEqual(consoleErrors,[]);assert.deepEqual(apiRequests,[]);
+ console.log(JSON.stringify({browser:'actual isolated headless browser',courses:10,steps:40,toggleAndReload:true,categoryFilter:true,completionBadge:true,mobileWidth:375,pageErrors:errors.length,consoleErrors:consoleErrors.length,apiRequests:apiRequests.length,backendIntegration:'not exercised; original tutorials persist locally'},null,2));
 }finally{if(browser)await browser.close();server.kill();}

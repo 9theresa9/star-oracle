@@ -1,5 +1,7 @@
 # 照见 API 完整参考与 Java 迁移契约
 
+2026-10-19 current frontend verification: actual Vue library now preserves all78tarot/64hexagram records, SVG art, filters/query/history and native dialogs. Unit/actualSSR9/9+typecheck/build pass; real isolated Edge checked every142detail record and all10tutorials/40steps, with separately observed pageErrors0/consoleErrors0/API0. These original public features have no backend persistence endpoint. Authenticated Vue/Java chains and all52+8JavaHTTP operations remain pending; old production React entry is intact. See docs/migration/2026-10-19-vue-library-verification.md.
+
 2026-10-19 frontend migration: independent Vue tutorial module now preserves all10courses/40steps and actor-scoped local progress; composable/actualSFC SSR6/6, typecheck and production build pass. This original feature has no server persistence endpoint. The guest review entry does not activate login; confirmed session host, other/API-backed pages and real Java integration remain pending. The original loopback browser action subsequently passed through formal approval: actual isolated Edge verified toggle/reload, categories, completion and375px mobile layout with0console errors and0API calls; backend integration is not exercised. Original React entry remains unchanged. See docs/migration/2026-10-19-vue-tutorials-verification.md.
 
 基线：9theresa9/star-oracle，提交 `139554bb4594eb8ca8ab6da4f130506ad062c76d`，2026-10-17 核验。本文覆盖现有 52 个业务操作（42 路径）及 8 个认证操作。Java 迁移当前全部 pending；本文描述现有可运行实现及必须保留的契约，不表示新 Java 接口已实现。

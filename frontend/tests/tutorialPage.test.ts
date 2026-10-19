@@ -6,7 +6,7 @@ import {createServer} from 'vite';
 import {TUTORIALS} from '../../packages/domain/index.js';
 
 test('actual Vue SFC renders all canonical courses and actor-scoped stored progress',async()=>{
- const server=await createServer({server:{middlewareMode:true,hmr:false},appType:'custom',optimizeDeps:{noDiscovery:true,entries:[]}});
+ const server=await createServer({server:{middlewareMode:true,hmr:false,ws:false},appType:'custom',optimizeDeps:{noDiscovery:true,entries:[]}});
  try{
   const {default:Page}=await server.ssrLoadModule('/src/tutorials/TutorialPage.vue');
   const id=TUTORIALS[0]!.id+':0',reads:string[]=[];
