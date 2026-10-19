@@ -1,5 +1,7 @@
 # 照见 API 完整参考与 Java 迁移契约
 
+2026-10-19 frontend migration: independent Vue tutorial module now preserves all10courses/40steps and actor-scoped local progress; composable/actualSFC SSR6/6, typecheck and production build pass. This original feature has no server persistence endpoint. The guest review entry does not activate login; confirmed session host, other/API-backed pages and real Java integration remain pending. Real browser gate fails at loopback EACCES before launching Edge; no screenshot or browser pass is claimed. Original React entry remains unchanged. See docs/migration/2026-10-19-vue-tutorials-verification.md.
+
 基线：9theresa9/star-oracle，提交 `139554bb4594eb8ca8ab6da4f130506ad062c76d`，2026-10-17 核验。本文覆盖现有 52 个业务操作（42 路径）及 8 个认证操作。Java 迁移当前全部 pending；本文描述现有可运行实现及必须保留的契约，不表示新 Java 接口已实现。
 
 源码：[当前基线](https://github.com/9theresa9/star-oracle/tree/139554bb4594eb8ca8ab6da4f130506ad062c76d)。请求模型以 packages/contracts/index.js、各 controller 内 Zod 为准；响应以各 service 的实际投影为准。现有 docs/openapi.json 被用作逐字段底稿；本次已按源码补全遗漏的 Error.code、User.username/sessionBinding、AdminUser.username、Config.deploymentMode。原 OpenAPI 没有列出 Better Auth 入口，本文件单独补充。

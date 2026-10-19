@@ -1,0 +1,22 @@
+name: Vue migration feature checks
+on:
+  push:
+    branches: [frontend]
+    paths: ['frontend/**', 'packages/domain/**', '.github/workflows/vue-migration-ci.yml']
+  pull_request:
+    paths: ['frontend/**', 'packages/domain/**', '.github/workflows/vue-migration-ci.yml']
+permissions:
+  contents: read
+jobs:
+  tutorials:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24.10.0'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --prefix frontend --ignore-scripts
+      - run: npm run check --prefix frontend
